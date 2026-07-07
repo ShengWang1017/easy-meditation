@@ -47,20 +47,23 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
   async restore() {
-    try {
-      const savedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      if (!savedRefreshToken) {
-        set({ accessToken: null, refreshToken: null, isRestoring: false });
-        return;
-      }
+    let savedRefreshToken: string | null;
 
-      const tokens = await authApi.refresh(savedRefreshToken);
-      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
-      set({
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        isRestoring: false
-      });
+    try {
+      savedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    } catch {
+      set({ accessToken: null, refreshToken: null, isRestoring: false });
+      return;
+    }
+
+    if (!savedRefreshToken) {
+      set({ accessToken: null, refreshToken: null, isRestoring: false });
+      return;
+    }
+
+    let tokens;
+    try {
+      tokens = await authApi.refresh(savedRefreshToken);
     } catch (error) {
       if (isInvalidRefreshTokenError(error)) {
         try {
@@ -75,6 +78,23 @@ export const useAuthStore = create<AuthState>((set) => ({
         refreshToken: null,
         isRestoring: false
       });
+      return;
+    }
+
+    set({
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      isRestoring: false
+    });
+
+    try {
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    } catch {
+      try {
+        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      } catch {
+        // Best-effort cleanup: keep the fresh in-memory session even if secure storage stays stale.
+      }
     }
   },
   async logout() {

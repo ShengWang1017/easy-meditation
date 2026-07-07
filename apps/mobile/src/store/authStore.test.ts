@@ -78,6 +78,28 @@ describe('useAuthStore', () => {
     });
   });
 
+  it('keeps rotated tokens in memory when persisting them after restore fails', async () => {
+    secureStore.getItemAsync.mockResolvedValue('old-refresh');
+    vi.spyOn(authApi, 'refresh').mockResolvedValue({
+      accessToken: 'new-access',
+      refreshToken: 'new-refresh'
+    });
+    secureStore.setItemAsync.mockRejectedValue(new Error('secure store write failed'));
+
+    await expect(useAuthStore.getState().restore()).resolves.toBeUndefined();
+
+    expect(secureStore.setItemAsync).toHaveBeenCalledWith(
+      'easyMeditation.refreshToken',
+      'new-refresh'
+    );
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'new-access',
+      refreshToken: 'new-refresh',
+      isRestoring: false
+    });
+  });
+
   it('deletes the saved refresh token only when refresh returns INVALID_REFRESH_TOKEN', async () => {
     secureStore.getItemAsync.mockResolvedValue('stale-refresh');
     vi.spyOn(authApi, 'refresh').mockRejectedValue(
