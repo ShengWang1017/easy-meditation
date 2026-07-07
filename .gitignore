@@ -2,3 +2,12 @@
 .superpowers/
 .worktrees/
 qa-*.png
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.expo/
+.expo-shared/
+coverage/
+apps/api/prisma/generated/

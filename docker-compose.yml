@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: easy_meditation
+      POSTGRES_USER: easy_meditation
+      POSTGRES_PASSWORD: easy_meditation
+    volumes:
+      - easy_meditation_pg:/var/lib/postgresql/data
+
+volumes:
+  easy_meditation_pg:
