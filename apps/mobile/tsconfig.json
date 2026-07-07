@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "paths": {
+      "@easy-meditation/shared": [
+        "../../packages/shared/src/index.ts"
+      ]
+    },
+    "types": [
+      "react",
+      "react-native",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "app",
+    "src",
+    "expo-env.d.ts"
+  ]
+}

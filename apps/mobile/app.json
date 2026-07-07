@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Easy Meditation",
+    "slug": "easy-meditation",
+    "scheme": "easy-meditation",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ]
+  }
+}
