@@ -19,17 +19,21 @@ Branch: `codex/mobile-backend-vertical-slice`
 
 ## Database And API
 
-Commands run:
+Recorded verification commands run:
 
 - `npm run db:up`
 - `docker compose ps`
 - `npm --workspace apps/api run prisma:migrate`
 - `npm --workspace apps/api run prisma:seed`
+- `Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','dev:api' -WorkingDirectory (Get-Location) -WindowStyle Hidden -RedirectStandardOutput '.superpowers/sdd/logs/task8-api.stdout.log' -RedirectStandardError '.superpowers/sdd/logs/task8-api.stderr.log' -PassThru`
+
+Human-facing equivalent:
+
 - `npm run dev:api`
 
 Observed result:
 
-- PostgreSQL container `mobile-backend-vertical-slice-postgres-1` was already running on `127.0.0.1:5432`.
+- PostgreSQL container `mobile-backend-vertical-slice-postgres-1` was already running with Docker publishing `0.0.0.0:5432`; local verification connected through `127.0.0.1:5432`.
 - Prisma migrate reported `Already in sync, no schema change or pending migration was found.`
 - Prisma seed completed without error.
 - API started on `http://127.0.0.1:4000`.
@@ -98,7 +102,13 @@ Observed results:
 
 ## Expo / Mobile Boot Verification
 
-Command run:
+Recorded verification command run:
+
+```powershell
+Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-Command',"`$env:EXPO_PUBLIC_API_BASE_URL='http://127.0.0.1:4000'; npm.cmd run dev:mobile -- --non-interactive" -WorkingDirectory (Get-Location) -WindowStyle Hidden -RedirectStandardOutput '.superpowers/sdd/logs/task8-mobile.stdout.log' -RedirectStandardError '.superpowers/sdd/logs/task8-mobile.stderr.log' -PassThru
+```
+
+Human-facing equivalent:
 
 ```powershell
 $env:EXPO_PUBLIC_API_BASE_URL='http://127.0.0.1:4000'
