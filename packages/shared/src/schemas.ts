@@ -32,6 +32,14 @@ export const authLoginSchema = z.object({
   password: z.string().min(1).max(128)
 });
 
+export const authRefreshSchema = z.object({
+  refreshToken: z.string().min(1)
+});
+
+export const authLogoutSchema = z.object({
+  refreshToken: z.string().min(1).optional()
+});
+
 export const tokenPairSchema = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().min(1)
@@ -133,6 +141,8 @@ export type BreathingMethod = z.infer<typeof breathingMethodSchema>;
 export type MethodType = z.infer<typeof methodTypeSchema>;
 export type AuthRegisterInput = z.infer<typeof authRegisterSchema>;
 export type AuthLoginInput = z.infer<typeof authLoginSchema>;
+export type AuthRefreshInput = z.infer<typeof authRefreshSchema>;
+export type AuthLogoutInput = z.infer<typeof authLogoutSchema>;
 export type TokenPair = z.infer<typeof tokenPairSchema>;
 export type Me = z.infer<typeof meSchema>;
 export type CustomRhythmCreateInput = z.infer<typeof customRhythmCreateSchema>;

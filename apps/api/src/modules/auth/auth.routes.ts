@@ -1,13 +1,31 @@
 import type { FastifyInstance } from 'fastify';
-import { authLoginSchema, authRegisterSchema, tokenPairSchema } from '@easy-meditation/shared';
+import {
+  authLoginSchema,
+  authLogoutSchema,
+  authRefreshSchema,
+  authRegisterSchema,
+  tokenPairSchema
+} from '@easy-meditation/shared';
 import { prisma } from '../../db.js';
 import {
   hashPassword,
   hashRefreshToken,
+  isPrismaUniqueConstraintError,
   issueTokenPair,
   normalizeEmail,
   verifyPassword
 } from './auth.service.js';
+
+function emailAlreadyRegisteredError() {
+  return {
+    data: null,
+    error: {
+      code: 'EMAIL_ALREADY_REGISTERED',
+      message: 'This email is already registered.',
+      fields: { email: 'This email is already registered.' }
+    }
+  };
+}
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.post('/auth/register', async (request, reply) => {
@@ -16,24 +34,29 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const existing = await prisma.user.findUnique({ where: { email } });
 
     if (existing) {
-      return reply.code(409).send({
-        data: null,
-        error: {
-          code: 'EMAIL_ALREADY_REGISTERED',
-          message: 'This email is already registered.',
-          fields: { email: 'This email is already registered.' }
-        }
-      });
+      return reply.code(409).send(emailAlreadyRegisteredError());
     }
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash: await hashPassword(input.password),
-        nickname: input.nickname ?? null,
-        settings: { create: {} }
+    const passwordHash = await hashPassword(input.password);
+    let user;
+
+    try {
+      user = await prisma.user.create({
+        data: {
+          email,
+          passwordHash,
+          nickname: input.nickname ?? null,
+          settings: { create: {} }
+        }
+      });
+    } catch (error) {
+      if (isPrismaUniqueConstraintError(error)) {
+        return reply.code(409).send(emailAlreadyRegisteredError());
       }
-    });
+
+      throw error;
+    }
+
     const tokens = await issueTokenPair(app, user);
 
     return reply.code(201).send({
@@ -67,15 +90,16 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/refresh', async (request, reply) => {
-    const body = request.body as { refreshToken?: string };
-    if (!body.refreshToken) {
+    const parsed = authRefreshSchema.safeParse(request.body);
+    if (!parsed.success) {
       return reply.code(400).send({
         data: null,
         error: { code: 'REFRESH_TOKEN_REQUIRED', message: 'Refresh token is required.' }
       });
     }
 
-    const tokenHash = hashRefreshToken(body.refreshToken);
+    const input = parsed.data;
+    const tokenHash = hashRefreshToken(input.refreshToken);
     const stored = await prisma.refreshToken.findFirst({
       where: {
         tokenHash,
@@ -102,10 +126,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/logout', async (request) => {
-    const body = request.body as { refreshToken?: string };
-    if (body.refreshToken) {
+    const input = authLogoutSchema.parse(request.body ?? {});
+    if (input.refreshToken) {
       await prisma.refreshToken.updateMany({
-        where: { tokenHash: hashRefreshToken(body.refreshToken), revokedAt: null },
+        where: { tokenHash: hashRefreshToken(input.refreshToken), revokedAt: null },
         data: { revokedAt: new Date() }
       });
     }

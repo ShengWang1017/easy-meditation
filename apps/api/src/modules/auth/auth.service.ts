@@ -31,6 +31,15 @@ export function createRefreshToken(): string {
   return crypto.randomBytes(48).toString('base64url');
 }
 
+export function isPrismaUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'P2002'
+  );
+}
+
 export async function issueTokenPair(app: FastifyInstance, user: AuthUser) {
   const env = loadEnv();
   const accessToken = app.jwt.sign({ sub: user.id, email: user.email }, {

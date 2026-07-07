@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
   apiErrorSchema,
+  authRefreshSchema,
+  authLogoutSchema,
   customRhythmCreateSchema,
   customRhythmReadSchema,
   customRhythmsListSchema,
@@ -99,5 +101,17 @@ describe('shared API schemas', () => {
       data: null,
       error
     });
+  });
+
+  test('shares refresh and logout token body schemas with the API', () => {
+    const refreshBody = authRefreshSchema.parse({
+      refreshToken: 'refresh-token-value'
+    });
+    const logoutBody = authLogoutSchema.parse({
+      refreshToken: 'refresh-token-value'
+    });
+
+    expect(refreshBody).toEqual({ refreshToken: 'refresh-token-value' });
+    expect(logoutBody).toEqual({ refreshToken: 'refresh-token-value' });
   });
 });
