@@ -67,19 +67,26 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   async logout() {
     const refreshToken = useAuthStore.getState().refreshToken;
-    if (refreshToken) {
-      try {
-        await authApi.logout(refreshToken);
-      } catch {
-        // Best-effort revocation: clear local state even if the network call fails.
+    try {
+      if (refreshToken) {
+        try {
+          await authApi.logout(refreshToken);
+        } catch {
+          // Best-effort revocation: clear local state even if the network call fails.
+        }
       }
-    }
 
-    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-    set({
-      accessToken: null,
-      refreshToken: null,
-      isRestoring: false
-    });
+      try {
+        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      } catch {
+        // Best-effort secure storage cleanup: clear local state even if deletion fails.
+      }
+    } finally {
+      set({
+        accessToken: null,
+        refreshToken: null,
+        isRestoring: false
+      });
+    }
   }
 }));

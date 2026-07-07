@@ -182,4 +182,24 @@ describe('useAuthStore', () => {
       isRestoring: false
     });
   });
+
+  it('still clears local auth state when secure storage deletion fails during logout', async () => {
+    useAuthStore.setState({
+      accessToken: 'session-access',
+      refreshToken: 'session-refresh',
+      isRestoring: true
+    });
+    vi.spyOn(authApi, 'logout').mockResolvedValue(undefined);
+    secureStore.deleteItemAsync.mockRejectedValue(new Error('secure store unavailable'));
+
+    await expect(useAuthStore.getState().logout()).resolves.toBeUndefined();
+
+    expect(authApi.logout).toHaveBeenCalledWith('session-refresh');
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isRestoring: false
+    });
+  });
 });
