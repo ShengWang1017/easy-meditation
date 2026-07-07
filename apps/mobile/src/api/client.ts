@@ -20,6 +20,27 @@ type ExpoConfigWithDevHost = {
   debuggerHost?: string | null;
 };
 
+type ApiRequestErrorOptions = {
+  status: number;
+  code: string;
+  message: string;
+  fields?: Record<string, string>;
+};
+
+export class ApiRequestError extends Error {
+  status: number;
+  code: string;
+  fields?: Record<string, string>;
+
+  constructor({ status, code, message, fields }: ApiRequestErrorOptions) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+    this.fields = fields;
+  }
+}
+
 function getExpoHost(): string | null {
   const expoConfig = Constants.expoConfig as ExpoConfigWithDevHost | null;
   const hostUri = expoConfig?.hostUri;
@@ -71,8 +92,17 @@ export async function apiRequest<T>(
   });
   const body = (await response.json()) as ApiEnvelope<T>;
 
-  if (!response.ok || body.error || body.data === null) {
-    throw new Error(body.error?.message ?? '请求失败，请稍后再试。');
+  if (body.error) {
+    throw new ApiRequestError({
+      status: response.status,
+      code: body.error.code,
+      message: body.error.message,
+      fields: body.error.fields
+    });
+  }
+
+  if (!response.ok || body.data === null) {
+    throw new Error('请求失败，请稍后再试。');
   }
 
   return body.data;

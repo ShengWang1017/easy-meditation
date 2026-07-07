@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 import type { AuthLoginInput, AuthRegisterInput } from '@easy-meditation/shared';
 import * as authApi from '../api/auth';
+import { ApiRequestError } from '../api/client';
 
 const REFRESH_TOKEN_KEY = 'easyMeditation.refreshToken';
 
@@ -14,6 +15,14 @@ type AuthState = {
   restore(): Promise<void>;
   logout(): Promise<void>;
 };
+
+function isInvalidRefreshTokenError(error: unknown): error is ApiRequestError {
+  return (
+    error instanceof ApiRequestError &&
+    error.status === 401 &&
+    error.code === 'INVALID_REFRESH_TOKEN'
+  );
+}
 
 export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
@@ -52,12 +61,15 @@ export const useAuthStore = create<AuthState>((set) => ({
         refreshToken: tokens.refreshToken,
         isRestoring: false
       });
-    } catch {
-      try {
-        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-      } catch {
-        // Ignore secure storage cleanup failures so auth restore can still complete locally.
+    } catch (error) {
+      if (isInvalidRefreshTokenError(error)) {
+        try {
+          await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+        } catch {
+          // Ignore secure storage cleanup failures so auth restore can still complete locally.
+        }
       }
+
       set({
         accessToken: null,
         refreshToken: null,

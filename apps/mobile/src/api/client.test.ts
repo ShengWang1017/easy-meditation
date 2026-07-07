@@ -78,19 +78,30 @@ describe('apiRequest', () => {
     expect(requestHeaders.get('authorization')).toBeNull();
   });
 
-  it('throws the server error message from an error envelope', async () => {
+  it('throws a structured error from an error envelope', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: false,
+        status: 401,
         json: async () => ({
           data: null,
-          error: { code: 'INVALID_CREDENTIALS', message: '邮箱或密码不正确。' }
+          error: {
+            code: 'INVALID_CREDENTIALS',
+            message: '邮箱或密码不正确。',
+            fields: { email: 'NOT_FOUND' }
+          }
         })
       })
     );
 
-    await expect(apiRequest('/auth/login')).rejects.toThrow('邮箱或密码不正确。');
+    await expect(apiRequest('/auth/login')).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 401,
+      code: 'INVALID_CREDENTIALS',
+      message: '邮箱或密码不正确。',
+      fields: { email: 'NOT_FOUND' }
+    });
   });
 
   it('prefers EXPO_PUBLIC_API_BASE_URL when provided', () => {

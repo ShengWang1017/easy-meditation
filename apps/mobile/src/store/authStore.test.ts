@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthLoginInput, AuthRegisterInput } from '@easy-meditation/shared';
+import { ApiRequestError } from '../api/client';
 import { useAuthStore } from './authStore';
 import * as authApi from '../api/auth';
 
@@ -77,13 +78,53 @@ describe('useAuthStore', () => {
     });
   });
 
-  it('clears local auth state when refresh restore fails', async () => {
+  it('deletes the saved refresh token only when refresh returns INVALID_REFRESH_TOKEN', async () => {
     secureStore.getItemAsync.mockResolvedValue('stale-refresh');
-    vi.spyOn(authApi, 'refresh').mockRejectedValue(new Error('expired'));
+    vi.spyOn(authApi, 'refresh').mockRejectedValue(
+      new ApiRequestError({
+        status: 401,
+        code: 'INVALID_REFRESH_TOKEN',
+        message: 'Refresh token is invalid.'
+      })
+    );
 
     await useAuthStore.getState().restore();
 
     expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isRestoring: false
+    });
+  });
+
+  it('keeps the saved refresh token when refresh fails with a transient structured error', async () => {
+    secureStore.getItemAsync.mockResolvedValue('saved-refresh');
+    vi.spyOn(authApi, 'refresh').mockRejectedValue(
+      new ApiRequestError({
+        status: 500,
+        code: 'SERVER_ERROR',
+        message: 'Server unavailable.'
+      })
+    );
+
+    await useAuthStore.getState().restore();
+
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isRestoring: false
+    });
+  });
+
+  it('keeps the saved refresh token when refresh fails with a transport error', async () => {
+    secureStore.getItemAsync.mockResolvedValue('saved-refresh');
+    vi.spyOn(authApi, 'refresh').mockRejectedValue(new TypeError('Network request failed'));
+
+    await useAuthStore.getState().restore();
+
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
       refreshToken: null,
