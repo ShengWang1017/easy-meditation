@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  nickname     String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  refreshTokens    RefreshToken[]
+  customRhythms    CustomRhythm[]
+  practiceSessions PracticeSession[]
+  settings         UserSettings?
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model BreathingMethod {
+  id                     String   @id
+  slug                   String   @unique
+  title                  String
+  subtitle               String
+  category               String
+  defaultDurationSeconds Int      @map("default_duration_seconds")
+  phases                 Json
+  sortOrder              Int      @map("sort_order")
+  isActive               Boolean  @default(true) @map("is_active")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  practiceSessions PracticeSession[]
+
+  @@map("breathing_methods")
+}
+
+model CustomRhythm {
+  id                     String    @id @default(uuid()) @db.Uuid
+  userId                 String    @map("user_id") @db.Uuid
+  name                   String
+  inhaleSeconds          Int       @map("inhale_seconds")
+  holdSeconds            Int       @map("hold_seconds")
+  exhaleSeconds          Int       @map("exhale_seconds")
+  defaultDurationSeconds Int       @map("default_duration_seconds")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+  deletedAt              DateTime? @map("deleted_at")
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practiceSessions PracticeSession[]
+
+  @@index([userId])
+  @@map("custom_rhythms")
+}
+
+model PracticeSession {
+  id                     String   @id @default(uuid()) @db.Uuid
+  clientSessionId        String   @unique @map("client_session_id") @db.Uuid
+  userId                 String   @map("user_id") @db.Uuid
+  methodType             String   @map("method_type")
+  methodId               String?  @map("method_id")
+  customRhythmId         String?  @map("custom_rhythm_id") @db.Uuid
+  methodTitleSnapshot    String   @map("method_title_snapshot")
+  rhythmSnapshot         Json     @map("rhythm_snapshot")
+  plannedDurationSeconds Int      @map("planned_duration_seconds")
+  actualDurationSeconds  Int      @map("actual_duration_seconds")
+  completed              Boolean
+  startedAt              DateTime @map("started_at")
+  endedAt                DateTime @map("ended_at")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method       BreathingMethod? @relation(fields: [methodId], references: [id])
+  customRhythm CustomRhythm?    @relation(fields: [customRhythmId], references: [id])
+
+  @@index([userId, endedAt])
+  @@map("practice_sessions")
+}
+
+model UserSettings {
+  userId                 String   @id @map("user_id") @db.Uuid
+  defaultMethodType      String   @default("built_in") @map("default_method_type")
+  defaultMethodId        String?  @default("box") @map("default_method_id")
+  defaultCustomRhythmId  String?  @map("default_custom_rhythm_id") @db.Uuid
+  defaultDurationSeconds Int      @default(180) @map("default_duration_seconds")
+  soundEnabled           Boolean  @default(true) @map("sound_enabled")
+  hapticsEnabled         Boolean  @default(true) @map("haptics_enabled")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}

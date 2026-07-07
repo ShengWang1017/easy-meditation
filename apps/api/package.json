@@ -1,0 +1,33 @@
+{
+  "name": "@easy-meditation/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@easy-meditation/shared": "file:../../packages/shared",
+    "@fastify/cors": "^10.0.1",
+    "@prisma/client": "^6.11.1",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.4.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.12",
+    "prisma": "^6.11.1",
+    "tsx": "^4.20.3",
+    "vitest": "^3.2.4"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}
