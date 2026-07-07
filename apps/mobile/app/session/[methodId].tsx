@@ -1,16 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { secondsToTimerLabel } from '@easy-meditation/shared';
 import { fetchBreathingMethods } from '../../src/api/methods';
+import {
+  buildCompletedPracticeSessionInput,
+  createPracticeSession
+} from '../../src/api/sessions';
+import { Screen } from '../../src/components/Screen';
 import type { SessionClockSnapshot } from '../../src/domain/sessionClock';
 import { createSessionClock } from '../../src/domain/sessionClock';
-import { Screen } from '../../src/components/Screen';
 import { colors, spacing } from '../../src/theme/tokens';
 
 export default function SessionScreen() {
   const { methodId } = useLocalSearchParams<{ methodId: string }>();
+  const queryClient = useQueryClient();
   const methodsQuery = useQuery({
     queryKey: ['breathing-methods'],
     queryFn: fetchBreathingMethods
@@ -25,6 +31,21 @@ export default function SessionScreen() {
   }, [method?.defaultDurationSeconds, method?.id]);
   const [snapshot, setSnapshot] = useState<SessionClockSnapshot | null>(null);
   const activeSnapshot = snapshot ?? (clock ? clock.snapshot() : null);
+  const startedAtRef = useRef<string | null>(null);
+  const clientSessionIdRef = useRef(Crypto.randomUUID());
+  const submittedRef = useRef(false);
+  const submitSessionMutation = useMutation({
+    mutationFn: createPracticeSession,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['stats-summary'] });
+    }
+  });
+
+  useEffect(() => {
+    startedAtRef.current = null;
+    clientSessionIdRef.current = Crypto.randomUUID();
+    submittedRef.current = false;
+  }, [method?.id]);
 
   useEffect(() => {
     if (!clock) {
@@ -46,6 +67,29 @@ export default function SessionScreen() {
 
     return () => clearInterval(timer);
   }, [activeSnapshot?.status, clock]);
+
+  useEffect(() => {
+    if (!method || !activeSnapshot || activeSnapshot.status !== 'completed' || submittedRef.current) {
+      return;
+    }
+
+    submittedRef.current = true;
+
+    const endedAt = new Date().toISOString();
+    const startedAt =
+      startedAtRef.current ??
+      new Date(Date.now() - activeSnapshot.elapsedSeconds * 1_000).toISOString();
+
+    void submitSessionMutation.mutateAsync(
+      buildCompletedPracticeSessionInput({
+        clientSessionId: clientSessionIdRef.current,
+        method,
+        actualDurationSeconds: activeSnapshot.elapsedSeconds,
+        startedAt,
+        endedAt
+      })
+    );
+  }, [activeSnapshot, method, submitSessionMutation]);
 
   if (methodsQuery.isLoading && !method) {
     return (
@@ -75,7 +119,7 @@ export default function SessionScreen() {
       <Screen>
         <View style={styles.center}>
           <Text style={styles.title}>没有找到这项练习</Text>
-          <Text style={styles.helperText}>请回到练习页重新选择一个方法。</Text>
+          <Text style={styles.helperText}>请回到练习页重新选择一种方法。</Text>
           <ActionButton label="返回练习页" onPress={() => router.replace('/(tabs)/practice')} />
         </View>
       </Screen>
@@ -96,6 +140,7 @@ export default function SessionScreen() {
   const activeClock = clock;
 
   function handleStart() {
+    startedAtRef.current = new Date().toISOString();
     activeClock.start();
     setSnapshot(activeClock.snapshot());
   }
@@ -128,6 +173,22 @@ export default function SessionScreen() {
           <Text style={styles.progressText}>
             已练习 {secondsToTimerLabel(activeSnapshot.elapsedSeconds)}
           </Text>
+          {activeSnapshot.status === 'completed' ? (
+            <Text
+              style={[
+                styles.submitStatus,
+                submitSessionMutation.isError ? styles.submitStatusError : null
+              ]}
+            >
+              {submitSessionMutation.isPending
+                ? '正在同步练习记录...'
+                : submitSessionMutation.isSuccess
+                  ? '练习记录已保存'
+                  : submitSessionMutation.isError
+                    ? '练习已完成，记录提交失败'
+                    : '练习已完成'}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.actions}>
@@ -241,6 +302,15 @@ const styles = StyleSheet.create({
   progressText: {
     color: colors.muted,
     fontSize: 15
+  },
+  submitStatus: {
+    color: colors.accentStrong,
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center'
+  },
+  submitStatusError: {
+    color: '#b75b52'
   },
   actions: {
     gap: spacing.md
