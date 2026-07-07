@@ -24,6 +24,7 @@ export default function SessionScreen() {
     return createSessionClock(method, method.defaultDurationSeconds);
   }, [method?.defaultDurationSeconds, method?.id]);
   const [snapshot, setSnapshot] = useState<SessionClockSnapshot | null>(null);
+  const activeSnapshot = snapshot ?? (clock ? clock.snapshot() : null);
 
   useEffect(() => {
     if (!clock) {
@@ -31,10 +32,11 @@ export default function SessionScreen() {
       return;
     }
 
-    const currentSnapshot = clock.snapshot();
-    setSnapshot(currentSnapshot);
+    setSnapshot(clock.snapshot());
+  }, [clock]);
 
-    if (currentSnapshot.status !== 'running') {
+  useEffect(() => {
+    if (!clock || activeSnapshot?.status !== 'running') {
       return;
     }
 
@@ -43,9 +45,9 @@ export default function SessionScreen() {
     }, 250);
 
     return () => clearInterval(timer);
-  }, [clock, snapshot?.status]);
+  }, [activeSnapshot?.status, clock]);
 
-  if (methodsQuery.isLoading) {
+  if (methodsQuery.isLoading && !method) {
     return (
       <Screen>
         <View style={styles.center}>
@@ -56,25 +58,36 @@ export default function SessionScreen() {
     );
   }
 
-  if (methodsQuery.isError) {
-    return (
-      <Screen>
-        <View style={styles.center}>
-          <Text style={styles.title}>暂时无法加载练习</Text>
-          <Text style={styles.helperText}>请检查网络后再试一次。</Text>
-          <ActionButton label="返回练习页" onPress={() => router.replace('/(tabs)/practice')} />
-        </View>
-      </Screen>
-    );
-  }
+  if (!method || !clock) {
+    if (methodsQuery.isError) {
+      return (
+        <Screen>
+          <View style={styles.center}>
+            <Text style={styles.title}>暂时无法加载练习</Text>
+            <Text style={styles.helperText}>请检查网络后再试一次。</Text>
+            <ActionButton label="返回练习页" onPress={() => router.replace('/(tabs)/practice')} />
+          </View>
+        </Screen>
+      );
+    }
 
-  if (!method || !clock || !snapshot) {
     return (
       <Screen>
         <View style={styles.center}>
           <Text style={styles.title}>没有找到这项练习</Text>
           <Text style={styles.helperText}>请回到练习页重新选择一个方法。</Text>
           <ActionButton label="返回练习页" onPress={() => router.replace('/(tabs)/practice')} />
+        </View>
+      </Screen>
+    );
+  }
+
+  if (!activeSnapshot) {
+    return (
+      <Screen>
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.accentStrong} size="large" />
+          <Text style={styles.helperText}>正在准备练习...</Text>
         </View>
       </Screen>
     );
@@ -106,26 +119,32 @@ export default function SessionScreen() {
         </View>
 
         <View style={styles.timerPanel}>
-          <Text style={styles.phaseLabel}>{snapshot.phase.label}</Text>
-          <Text style={styles.phaseCountdown}>{snapshot.phase.remainingInPhase} 秒</Text>
+          <Text style={styles.phaseLabel}>{activeSnapshot.phase.label}</Text>
+          <Text style={styles.phaseCountdown}>{activeSnapshot.phase.remainingInPhase} 秒</Text>
           <View style={styles.orb} />
-          <Text style={styles.totalTimer}>{secondsToTimerLabel(snapshot.remainingSeconds)}</Text>
+          <Text style={styles.totalTimer}>
+            {secondsToTimerLabel(activeSnapshot.remainingSeconds)}
+          </Text>
           <Text style={styles.progressText}>
-            已练习 {secondsToTimerLabel(snapshot.elapsedSeconds)}
+            已练习 {secondsToTimerLabel(activeSnapshot.elapsedSeconds)}
           </Text>
         </View>
 
         <View style={styles.actions}>
-          {snapshot.status === 'idle' ? (
+          {activeSnapshot.status === 'idle' ? (
             <ActionButton label="开始练习" onPress={handleStart} />
           ) : null}
-          {snapshot.status === 'running' ? <ActionButton label="暂停" onPress={handlePause} /> : null}
-          {snapshot.status === 'paused' ? <ActionButton label="继续" onPress={handleResume} /> : null}
-          {snapshot.status === 'completed' ? (
+          {activeSnapshot.status === 'running' ? (
+            <ActionButton label="暂停" onPress={handlePause} />
+          ) : null}
+          {activeSnapshot.status === 'paused' ? (
+            <ActionButton label="继续" onPress={handleResume} />
+          ) : null}
+          {activeSnapshot.status === 'completed' ? (
             <ActionButton label="完成" onPress={() => router.replace('/(tabs)/practice')} />
           ) : null}
           <ActionButton
-            label={snapshot.status === 'completed' ? '回到练习页' : '结束并返回'}
+            label={activeSnapshot.status === 'completed' ? '回到练习页' : '结束并返回'}
             onPress={() => router.back()}
             tone="secondary"
           />
