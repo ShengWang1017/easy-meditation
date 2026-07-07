@@ -90,15 +90,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/refresh', async (request, reply) => {
-    const parsed = authRefreshSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        data: null,
-        error: { code: 'REFRESH_TOKEN_REQUIRED', message: 'Refresh token is required.' }
-      });
-    }
-
-    const input = parsed.data;
+    const input = authRefreshSchema.parse(request.body);
     const tokenHash = hashRefreshToken(input.refreshToken);
     const now = new Date();
     const stored = await prisma.refreshToken.findFirst({

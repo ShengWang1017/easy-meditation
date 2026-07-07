@@ -31,6 +31,8 @@ type ApiRequestErrorOptions = {
 
 const GENERIC_REQUEST_ERROR_MESSAGE = '请求失败，请稍后再试。';
 
+const inFlightRefreshes = new Map<string, Promise<TokenPair>>();
+
 export class ApiRequestError extends Error {
   status: number;
   code: string;
@@ -148,7 +150,16 @@ async function storeTokenPair(tokens: TokenPair): Promise<void> {
   }
 }
 
-async function refreshTokenPair(refreshToken: string): Promise<TokenPair> {
+function getCurrentTokenPair(): TokenPair | null {
+  const { accessToken, refreshToken } = useAuthStore.getState();
+  if (!accessToken || !refreshToken) {
+    return null;
+  }
+
+  return { accessToken, refreshToken };
+}
+
+async function runRefreshTokenPair(refreshToken: string): Promise<TokenPair> {
   const response = await fetch(`${resolveApiBaseUrl()}/auth/refresh`, {
     method: 'POST',
     headers: buildHeaders({ skipAuth: true }, null),
@@ -159,6 +170,11 @@ async function refreshTokenPair(refreshToken: string): Promise<TokenPair> {
 
   if (error) {
     if (error.status === 401 && error.code === 'INVALID_REFRESH_TOKEN') {
+      const currentTokens = getCurrentTokenPair();
+      if (currentTokens && currentTokens.refreshToken !== refreshToken) {
+        return currentTokens;
+      }
+
       await clearAuthState();
     }
 
@@ -171,6 +187,22 @@ async function refreshTokenPair(refreshToken: string): Promise<TokenPair> {
 
   await storeTokenPair(body.data);
   return body.data;
+}
+
+async function refreshTokenPair(refreshToken: string): Promise<TokenPair> {
+  const inFlightRefresh = inFlightRefreshes.get(refreshToken);
+  if (inFlightRefresh) {
+    return inFlightRefresh;
+  }
+
+  const refreshPromise = runRefreshTokenPair(refreshToken).finally(() => {
+    if (inFlightRefreshes.get(refreshToken) === refreshPromise) {
+      inFlightRefreshes.delete(refreshToken);
+    }
+  });
+
+  inFlightRefreshes.set(refreshToken, refreshPromise);
+  return refreshPromise;
 }
 
 export async function apiRequest<T>(

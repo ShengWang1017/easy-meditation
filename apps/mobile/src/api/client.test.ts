@@ -216,6 +216,105 @@ describe('apiRequest', () => {
     });
   });
 
+  it('shares a single refresh rotation across concurrent authenticated 401s', async () => {
+    useAuthStore.setState({
+      accessToken: 'expired-access',
+      refreshToken: 'refresh-token',
+      isRestoring: false
+    });
+
+    let refreshCalls = 0;
+    let meCalls = 0;
+    let releaseRefresh: (() => void) | null = null;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const authHeader = (init?.headers as Headers | undefined)?.get('authorization');
+
+      if (input === 'http://127.0.0.1:4000/me') {
+        meCalls += 1;
+        const requestNumber = meCalls;
+        if (authHeader === 'Bearer expired-access') {
+          return {
+            ok: false,
+            status: 401,
+            json: async () => ({
+              data: null,
+              error: { code: 'UNAUTHORIZED', message: 'Access token expired.' }
+            })
+          };
+        }
+
+        if (authHeader === 'Bearer fresh-access') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: { email: `person${requestNumber}@example.com` },
+              error: null
+            })
+          };
+        }
+      }
+
+      if (input === 'http://127.0.0.1:4000/auth/refresh') {
+        refreshCalls += 1;
+
+        if (refreshCalls === 1) {
+          await refreshGate;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: { accessToken: 'fresh-access', refreshToken: 'rotated-refresh' },
+              error: null
+            })
+          };
+        }
+
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({
+            data: null,
+            error: { code: 'INVALID_REFRESH_TOKEN', message: 'Please log in again.' }
+          })
+        };
+      }
+
+      throw new Error(`Unexpected request: ${input}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstRequest = apiRequest<{ email: string }>('/me');
+    const secondRequest = apiRequest<{ email: string }>('/me');
+
+    await Promise.resolve();
+    await Promise.resolve();
+    releaseRefresh?.();
+
+    await expect(Promise.all([firstRequest, secondRequest])).resolves.toEqual([
+      { email: 'person3@example.com' },
+      { email: 'person4@example.com' }
+    ]);
+
+    expect(refreshCalls).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+    expect(secureStore.setItemAsync).toHaveBeenCalledWith(
+      'easyMeditation.refreshToken',
+      'rotated-refresh'
+    );
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'fresh-access',
+      refreshToken: 'rotated-refresh',
+      isRestoring: false
+    });
+  });
+
   it('prefers EXPO_PUBLIC_API_BASE_URL when provided', () => {
     process.env.EXPO_PUBLIC_API_BASE_URL = 'https://api.example.com';
     platformMock.OS = 'android';

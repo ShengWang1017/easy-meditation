@@ -110,6 +110,28 @@ describe('auth flow', () => {
     });
   });
 
+  test('returns the standard validation envelope for an invalid refresh payload', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/refresh',
+      payload: {}
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Please check the highlighted fields.',
+        fields: {
+          refreshToken: expect.any(String)
+        }
+      }
+    });
+  });
+
   test('registers, reads current user, refreshes, and logs out', async () => {
     const app = await buildApp();
 
