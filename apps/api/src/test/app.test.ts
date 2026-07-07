@@ -83,6 +83,23 @@ describe('api app', () => {
 });
 
 describe('auth flow', () => {
+  test('rejects unauthenticated access to protected routes', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me'
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'UNAUTHORIZED'
+      }
+    });
+  });
+
   test('returns validation envelopes for invalid auth payloads', async () => {
     const app = await buildApp();
     const response = await app.inject({

@@ -225,7 +225,7 @@ describe('apiRequest', () => {
 
     let refreshCalls = 0;
     let meCalls = 0;
-    let releaseRefresh: (() => void) | null = null;
+    let releaseRefresh!: () => void;
     const refreshGate = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
     });
@@ -294,7 +294,7 @@ describe('apiRequest', () => {
 
     await Promise.resolve();
     await Promise.resolve();
-    releaseRefresh?.();
+    releaseRefresh();
 
     await expect(Promise.all([firstRequest, secondRequest])).resolves.toEqual([
       { email: 'person3@example.com' },

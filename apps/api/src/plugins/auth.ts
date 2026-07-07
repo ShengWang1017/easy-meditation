@@ -30,7 +30,7 @@ export const authPlugin = fp(async (app) => {
     try {
       await request.jwtVerify();
     } catch {
-      reply.code(401).send({
+      return reply.code(401).send({
         data: null,
         error: { code: 'UNAUTHORIZED', message: 'Please log in again.' }
       });
