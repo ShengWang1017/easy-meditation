@@ -26,3 +26,62 @@ describe('api app', () => {
     });
   });
 });
+
+describe('auth flow', () => {
+  test('registers, reads current user, refreshes, and logs out', async () => {
+    const app = await buildApp();
+
+    const register = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: {
+        email: `test-${Date.now()}@example.com`,
+        password: 'quiet-breathing-123',
+        nickname: 'Tester'
+      }
+    });
+    expect(register.statusCode).toBe(201);
+
+    const tokens = register.json().data.tokens;
+    expect(tokens.accessToken).toEqual(expect.any(String));
+    expect(tokens.refreshToken).toEqual(expect.any(String));
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: { authorization: `Bearer ${tokens.accessToken}` }
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().data.email).toContain('@example.com');
+
+    const refresh = await app.inject({
+      method: 'POST',
+      url: '/auth/refresh',
+      payload: { refreshToken: tokens.refreshToken }
+    });
+    expect(refresh.statusCode).toBe(200);
+    expect(refresh.json().data.accessToken).toEqual(expect.any(String));
+
+    const logout = await app.inject({
+      method: 'POST',
+      url: '/auth/logout',
+      payload: { refreshToken: tokens.refreshToken }
+    });
+    expect(logout.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  test('rejects invalid login with a generic error', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'missing@example.com', password: 'bad-password' }
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe('INVALID_CREDENTIALS');
+  });
+});
