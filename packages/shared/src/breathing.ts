@@ -13,7 +13,7 @@ export type SessionSnapshot = {
   isComplete: boolean;
 };
 
-export const BREATHING_METHODS_SEED: [BreathingMethod, BreathingMethod, BreathingMethod] = [
+export const BREATHING_METHODS_SEED: BreathingMethod[] = [
   {
     id: 'box',
     slug: 'box',

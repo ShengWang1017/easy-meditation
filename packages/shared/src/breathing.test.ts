@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest';
 import { BREATHING_METHODS_SEED, getSessionSnapshot, secondsToTimerLabel } from './breathing.js';
+import type { BreathingMethod } from './schemas.js';
+
+function getSeedMethod(index: number): BreathingMethod {
+  const method = BREATHING_METHODS_SEED[index];
+  expect(method).toBeDefined();
+  return method!;
+}
 
 describe('shared breathing helpers', () => {
   test('seeds built-in breathing methods with stable ids', () => {
@@ -11,7 +18,7 @@ describe('shared breathing helpers', () => {
   });
 
   test('calculates box breathing phases', () => {
-    const method = BREATHING_METHODS_SEED[0];
+    const method = getSeedMethod(0);
 
     expect(getSessionSnapshot(method, 0, 180)).toMatchObject({ label: '吸气', remainingInPhase: 4 });
     expect(getSessionSnapshot(method, 4, 180)).toMatchObject({ label: '屏息', remainingInPhase: 4 });
@@ -20,7 +27,7 @@ describe('shared breathing helpers', () => {
   });
 
   test('marks completion exactly at total duration', () => {
-    const method = BREATHING_METHODS_SEED[1];
+    const method = getSeedMethod(1);
 
     expect(getSessionSnapshot(method, 120, 120)).toMatchObject({
       kind: 'complete',
