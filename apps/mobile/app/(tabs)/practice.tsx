@@ -10,8 +10,9 @@ export default function PracticeScreen() {
     queryKey: ['breathing-methods'],
     queryFn: fetchBreathingMethods
   });
+  const methods = methodsQuery.data ?? [];
 
-  if (methodsQuery.isLoading) {
+  if (methodsQuery.isLoading && methods.length === 0) {
     return (
       <Screen>
         <View style={styles.state}>
@@ -22,7 +23,7 @@ export default function PracticeScreen() {
     );
   }
 
-  if (methodsQuery.isError) {
+  if (methodsQuery.isError && methods.length === 0) {
     return (
       <Screen>
         <View style={styles.state}>
@@ -40,7 +41,7 @@ export default function PracticeScreen() {
     );
   }
 
-  if (!methodsQuery.data?.length) {
+  if (methods.length === 0) {
     return (
       <Screen>
         <View style={styles.state}>
@@ -61,8 +62,24 @@ export default function PracticeScreen() {
         </Text>
       </View>
 
+      {methodsQuery.isError ? (
+        <View style={styles.warning}>
+          <View style={styles.warningCopy}>
+            <Text style={styles.warningTitle}>列表更新失败</Text>
+            <Text style={styles.warningText}>已显示上次加载的练习方法，可稍后重试。</Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void methodsQuery.refetch()}
+            style={({ pressed }) => [styles.warningButton, pressed ? styles.buttonPressed : null]}
+          >
+            <Text style={styles.warningButtonText}>重试</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={styles.grid}>
-        {methodsQuery.data.map((method) => (
+        {methods.map((method) => (
           <Pressable
             key={method.id}
             accessibilityRole="button"
@@ -108,6 +125,42 @@ const styles = StyleSheet.create({
   grid: {
     marginTop: spacing.xl,
     gap: spacing.md
+  },
+  warning: {
+    marginTop: spacing.xl,
+    gap: spacing.md,
+    borderRadius: 20,
+    padding: spacing.lg,
+    backgroundColor: 'rgba(188, 126, 72, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(188, 126, 72, 0.24)'
+  },
+  warningCopy: {
+    gap: spacing.xs
+  },
+  warningTitle: {
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '700'
+  },
+  warningText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20
+  },
+  warningButton: {
+    alignSelf: 'flex-start',
+    minHeight: 40,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surfaceStrong
+  },
+  warningButtonText: {
+    color: colors.surface,
+    fontSize: 14,
+    fontWeight: '700'
   },
   card: {
     minHeight: 140,
