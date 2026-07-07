@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import argon2 from 'argon2';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../db.js';
 import { loadEnv } from '../../env.js';
@@ -40,7 +41,11 @@ export function isPrismaUniqueConstraintError(error: unknown): error is { code: 
   );
 }
 
-export async function issueTokenPair(app: FastifyInstance, user: AuthUser) {
+export async function issueTokenPair(
+  app: FastifyInstance,
+  user: AuthUser,
+  db: PrismaClient | Prisma.TransactionClient = prisma
+) {
   const env = loadEnv();
   const accessToken = app.jwt.sign({ sub: user.id, email: user.email }, {
     expiresIn: `${env.ACCESS_TOKEN_TTL_SECONDS}s`

@@ -4,7 +4,7 @@ import type { AuthLoginInput, AuthRegisterInput } from '@easy-meditation/shared'
 import * as authApi from '../api/auth';
 import { ApiRequestError } from '../api/client';
 
-const REFRESH_TOKEN_KEY = 'easyMeditation.refreshToken';
+export const REFRESH_TOKEN_KEY = 'easyMeditation.refreshToken';
 
 type AuthState = {
   accessToken: string | null;

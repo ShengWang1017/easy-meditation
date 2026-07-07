@@ -7,6 +7,17 @@ import {
 import { prisma } from '../../db.js';
 import { isPrismaUniqueConstraintError } from '../auth/auth.service.js';
 
+function validationError(fields: Record<string, string>) {
+  return {
+    data: null,
+    error: {
+      code: 'VALIDATION_ERROR',
+      message: 'Please check the highlighted fields.',
+      fields
+    }
+  };
+}
+
 export function mapSession(session: Pick<
   PracticeSession,
   | 'id'
@@ -69,6 +80,68 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       }
 
       return { data: mapSession(existing), error: null };
+    }
+
+    if (input.methodType === 'built_in') {
+      if (!input.methodId) {
+        return reply.code(400).send(
+          validationError({ methodId: 'A built-in breathing method is required.' })
+        );
+      }
+
+      if (input.customRhythmId !== null) {
+        return reply.code(400).send(
+          validationError({ customRhythmId: 'Built-in sessions cannot use a custom rhythm.' })
+        );
+      }
+
+      const method = await prisma.breathingMethod.findFirst({
+        where: { id: input.methodId, isActive: true },
+        select: { id: true }
+      });
+
+      if (!method) {
+        return reply.code(404).send({
+          data: null,
+          error: {
+            code: 'BREATHING_METHOD_NOT_FOUND',
+            message: 'Breathing method was not found.'
+          }
+        });
+      }
+    }
+
+    if (input.methodType === 'custom') {
+      if (input.methodId !== null) {
+        return reply.code(400).send(
+          validationError({ methodId: 'Custom sessions cannot use a built-in method.' })
+        );
+      }
+
+      if (!input.customRhythmId) {
+        return reply.code(400).send(
+          validationError({ customRhythmId: 'A custom rhythm is required.' })
+        );
+      }
+
+      const customRhythm = await prisma.customRhythm.findFirst({
+        where: {
+          id: input.customRhythmId,
+          userId: request.user.sub,
+          deletedAt: null
+        },
+        select: { id: true }
+      });
+
+      if (!customRhythm) {
+        return reply.code(404).send({
+          data: null,
+          error: {
+            code: 'CUSTOM_RHYTHM_NOT_FOUND',
+            message: 'Custom rhythm was not found.'
+          }
+        });
+      }
     }
 
     try {

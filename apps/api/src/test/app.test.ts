@@ -25,6 +25,7 @@ async function registerTestAccount(app: Awaited<ReturnType<typeof buildApp>>) {
 
   return {
     accessToken: response.json().data.tokens.accessToken as string,
+    refreshToken: response.json().data.tokens.refreshToken as string,
     userId: user.id
   };
 }
@@ -32,6 +33,28 @@ async function registerTestAccount(app: Awaited<ReturnType<typeof buildApp>>) {
 async function registerTestUser(app: Awaited<ReturnType<typeof buildApp>>) {
   const account = await registerTestAccount(app);
   return account.accessToken;
+}
+
+function builtInSessionPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    clientSessionId: crypto.randomUUID(),
+    methodType: 'built_in',
+    methodId: 'box',
+    customRhythmId: null,
+    methodTitleSnapshot: 'Box breathing',
+    rhythmSnapshot: [
+      { kind: 'inhale', label: 'Inhale', durationSeconds: 4 },
+      { kind: 'hold', label: 'Hold', durationSeconds: 4 },
+      { kind: 'exhale', label: 'Exhale', durationSeconds: 4 },
+      { kind: 'hold', label: 'Hold', durationSeconds: 4 }
+    ],
+    plannedDurationSeconds: 180,
+    actualDurationSeconds: 180,
+    completed: true,
+    startedAt: new Date('2026-07-07T09:00:00.000Z').toISOString(),
+    endedAt: new Date('2026-07-07T09:03:00.000Z').toISOString(),
+    ...overrides
+  };
 }
 
 describe('api app', () => {
@@ -60,6 +83,33 @@ describe('api app', () => {
 });
 
 describe('auth flow', () => {
+  test('returns validation envelopes for invalid auth payloads', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: {
+        email: 'not-an-email',
+        password: 'short',
+        nickname: ''
+      }
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        fields: {
+          email: expect.any(String),
+          password: expect.any(String),
+          nickname: expect.any(String)
+        }
+      }
+    });
+  });
+
   test('registers, reads current user, refreshes, and logs out', async () => {
     const app = await buildApp();
 
@@ -152,6 +202,32 @@ describe('auth flow', () => {
     expect(reused.json().error.code).toBe('INVALID_REFRESH_TOKEN');
   });
 
+  test('allows exactly one rotation for a refresh token replay', async () => {
+    const app = await buildApp();
+    const { refreshToken } = await registerTestAccount(app);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/auth/refresh',
+      payload: { refreshToken }
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/auth/refresh',
+      payload: { refreshToken }
+    });
+    await app.close();
+
+    expect(first.statusCode).toBe(200);
+    expect(first.json().data.refreshToken).toEqual(expect.any(String));
+    expect(second.statusCode).toBe(401);
+    expect(second.json()).toMatchObject({
+      data: null,
+      error: { code: 'INVALID_REFRESH_TOKEN' }
+    });
+  });
+
+
   test('rejects a logged out refresh token', async () => {
     const app = await buildApp();
     const email = `logout-${Date.now()}@example.com`;
@@ -190,6 +266,187 @@ describe('auth flow', () => {
 });
 
 describe('practice sessions and stats', () => {
+  test('returns validation envelopes for invalid practice-session bodies', async () => {
+    const app = await buildApp();
+    const accessToken = await registerTestUser(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: builtInSessionPayload({
+        clientSessionId: 'not-a-uuid',
+        actualDurationSeconds: 0
+      })
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        fields: {
+          clientSessionId: expect.any(String),
+          actualDurationSeconds: expect.any(String)
+        }
+      }
+    });
+  });
+
+  test('rejects built-in practice sessions without an active built-in method only', async () => {
+    const app = await buildApp();
+    const { accessToken, userId } = await registerTestAccount(app);
+    const customRhythm = await prisma.customRhythm.create({
+      data: {
+        userId,
+        name: 'Custom calm',
+        inhaleSeconds: 4,
+        holdSeconds: 2,
+        exhaleSeconds: 6,
+        defaultDurationSeconds: 180
+      }
+    });
+
+    const missingMethod = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: builtInSessionPayload({ methodId: null })
+    });
+    const mixedRelation = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: builtInSessionPayload({ customRhythmId: customRhythm.id })
+    });
+    const unknownMethod = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: builtInSessionPayload({ methodId: 'missing-method' })
+    });
+    await app.close();
+
+    expect(missingMethod.statusCode).toBe(400);
+    expect(missingMethod.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        fields: { methodId: expect.any(String) }
+      }
+    });
+    expect(mixedRelation.statusCode).toBe(400);
+    expect(mixedRelation.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        fields: { customRhythmId: expect.any(String) }
+      }
+    });
+    expect(unknownMethod.statusCode).toBe(404);
+    expect(unknownMethod.json()).toMatchObject({
+      data: null,
+      error: { code: 'BREATHING_METHOD_NOT_FOUND' }
+    });
+  });
+
+  test('requires custom practice sessions to use the authenticated user custom rhythm only', async () => {
+    const app = await buildApp();
+    const first = await registerTestAccount(app);
+    const second = await registerTestAccount(app);
+    const ownedRhythm = await prisma.customRhythm.create({
+      data: {
+        userId: first.userId,
+        name: 'Owned rhythm',
+        inhaleSeconds: 4,
+        holdSeconds: 2,
+        exhaleSeconds: 6,
+        defaultDurationSeconds: 180
+      }
+    });
+    const otherUserRhythm = await prisma.customRhythm.create({
+      data: {
+        userId: second.userId,
+        name: 'Other rhythm',
+        inhaleSeconds: 5,
+        holdSeconds: 0,
+        exhaleSeconds: 7,
+        defaultDurationSeconds: 180
+      }
+    });
+
+    const missingRhythm = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${first.accessToken}` },
+      payload: builtInSessionPayload({
+        methodType: 'custom',
+        methodId: null,
+        customRhythmId: null
+      })
+    });
+    const mixedRelation = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${first.accessToken}` },
+      payload: builtInSessionPayload({
+        methodType: 'custom',
+        methodId: 'box',
+        customRhythmId: ownedRhythm.id
+      })
+    });
+    const crossUserRhythm = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${first.accessToken}` },
+      payload: builtInSessionPayload({
+        methodType: 'custom',
+        methodId: null,
+        customRhythmId: otherUserRhythm.id
+      })
+    });
+    const valid = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${first.accessToken}` },
+      payload: builtInSessionPayload({
+        methodType: 'custom',
+        methodId: null,
+        customRhythmId: ownedRhythm.id
+      })
+    });
+    await app.close();
+
+    expect(missingRhythm.statusCode).toBe(400);
+    expect(missingRhythm.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        fields: { customRhythmId: expect.any(String) }
+      }
+    });
+    expect(mixedRelation.statusCode).toBe(400);
+    expect(mixedRelation.json()).toMatchObject({
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        fields: { methodId: expect.any(String) }
+      }
+    });
+    expect(crossUserRhythm.statusCode).toBe(404);
+    expect(crossUserRhythm.json()).toMatchObject({
+      data: null,
+      error: { code: 'CUSTOM_RHYTHM_NOT_FOUND' }
+    });
+    expect(valid.statusCode).toBe(201);
+    expect(valid.json().data).toMatchObject({
+      methodType: 'custom',
+      methodId: null,
+      customRhythmId: ownedRhythm.id
+    });
+  });
+
   test('creates one practice session idempotently and updates stats', async () => {
     const app = await buildApp();
     const accessToken = await registerTestUser(app);
@@ -442,6 +699,125 @@ describe('practice sessions and stats', () => {
     expect(response.json().data.totalSessions).toBe(205);
     expect(response.json().data.totalPracticeSeconds).toBe(205);
     expect(response.json().data.recentSessions).toHaveLength(10);
+  });
+
+  test('computes weekly practice seconds from all sessions in the week, not only the recent window', async () => {
+    const app = await buildApp();
+    const { accessToken, userId } = await registerTestAccount(app);
+    const now = new Date();
+
+    await prisma.practiceSession.createMany({
+      data: Array.from({ length: 205 }, (_, index) => ({
+        clientSessionId: crypto.randomUUID(),
+        userId,
+        methodType: 'built_in' as const,
+        methodId: 'box',
+        customRhythmId: null,
+        methodTitleSnapshot: 'Box breathing',
+        rhythmSnapshot: [
+          { kind: 'inhale', label: 'Inhale', durationSeconds: 4 },
+          { kind: 'hold', label: 'Hold', durationSeconds: 4 },
+          { kind: 'exhale', label: 'Exhale', durationSeconds: 4 },
+          { kind: 'hold', label: 'Hold', durationSeconds: 4 }
+        ],
+        plannedDurationSeconds: 180,
+        actualDurationSeconds: 1,
+        completed: true,
+        startedAt: new Date(now.getTime() - index * 60 * 1000 - 30_000),
+        endedAt: new Date(now.getTime() - index * 60 * 1000)
+      }))
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/stats/summary',
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.weeklyPracticeSeconds).toBe(205);
+  });
+
+  test('computes the current streak from distinct practice dates beyond the recent window', async () => {
+    const app = await buildApp();
+    const { accessToken, userId } = await registerTestAccount(app);
+    const today = new Date();
+    const todayStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+    const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    await prisma.practiceSession.createMany({
+      data: [
+        ...Array.from({ length: 205 }, (_, index) => ({
+          clientSessionId: crypto.randomUUID(),
+          userId,
+          methodType: 'built_in' as const,
+          methodId: 'box',
+          customRhythmId: null,
+          methodTitleSnapshot: 'Box breathing',
+          rhythmSnapshot: [
+            { kind: 'inhale', label: 'Inhale', durationSeconds: 4 },
+            { kind: 'hold', label: 'Hold', durationSeconds: 4 },
+            { kind: 'exhale', label: 'Exhale', durationSeconds: 4 },
+            { kind: 'hold', label: 'Hold', durationSeconds: 4 }
+          ],
+          plannedDurationSeconds: 180,
+          actualDurationSeconds: 1,
+          completed: true,
+          startedAt: new Date(tomorrowStart.getTime() + index * 60 * 1000),
+          endedAt: new Date(tomorrowStart.getTime() + index * 60 * 1000 + 30_000)
+        })),
+        {
+          clientSessionId: crypto.randomUUID(),
+          userId,
+          methodType: 'built_in' as const,
+          methodId: 'box',
+          customRhythmId: null,
+          methodTitleSnapshot: 'Box breathing',
+          rhythmSnapshot: [
+            { kind: 'inhale', label: 'Inhale', durationSeconds: 4 },
+            { kind: 'hold', label: 'Hold', durationSeconds: 4 },
+            { kind: 'exhale', label: 'Exhale', durationSeconds: 4 },
+            { kind: 'hold', label: 'Hold', durationSeconds: 4 }
+          ],
+          plannedDurationSeconds: 180,
+          actualDurationSeconds: 1,
+          completed: true,
+          startedAt: new Date(todayStart.getTime() + 60 * 60 * 1000),
+          endedAt: new Date(todayStart.getTime() + 60 * 60 * 1000 + 30_000)
+        },
+        {
+          clientSessionId: crypto.randomUUID(),
+          userId,
+          methodType: 'built_in' as const,
+          methodId: 'box',
+          customRhythmId: null,
+          methodTitleSnapshot: 'Box breathing',
+          rhythmSnapshot: [
+            { kind: 'inhale', label: 'Inhale', durationSeconds: 4 },
+            { kind: 'hold', label: 'Hold', durationSeconds: 4 },
+            { kind: 'exhale', label: 'Exhale', durationSeconds: 4 },
+            { kind: 'hold', label: 'Hold', durationSeconds: 4 }
+          ],
+          plannedDurationSeconds: 180,
+          actualDurationSeconds: 1,
+          completed: true,
+          startedAt: new Date(yesterdayStart.getTime() + 60 * 60 * 1000),
+          endedAt: new Date(yesterdayStart.getTime() + 60 * 60 * 1000 + 30_000)
+        }
+      ]
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/stats/summary',
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.currentStreak).toBe(2);
   });
 });
 

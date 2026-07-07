@@ -8,8 +8,16 @@ function utcDateKey(date: Date): string {
   return startOfUtcDay(date).toISOString().slice(0, 10);
 }
 
+export function startOfWeeklyWindow(now = new Date()): Date {
+  return new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+}
+
 export function deriveCurrentStreak(sessions: Pick<PracticeSession, 'endedAt'>[], now = new Date()): number {
-  const practicedDays = new Set(sessions.map((session) => utcDateKey(session.endedAt)));
+  const practicedDays = new Set(
+    sessions
+      .filter((session) => session.endedAt <= now)
+      .map((session) => utcDateKey(session.endedAt))
+  );
   let cursor = startOfUtcDay(now);
   let streak = 0;
 
@@ -25,8 +33,8 @@ export function deriveWeeklyPracticeSeconds(
   sessions: Pick<PracticeSession, 'endedAt' | 'actualDurationSeconds'>[],
   now = new Date()
 ): number {
-  const weekStart = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+  const weekStart = startOfWeeklyWindow(now);
   return sessions
-    .filter((session) => session.endedAt >= weekStart)
+    .filter((session) => session.endedAt >= weekStart && session.endedAt <= now)
     .reduce((sum, session) => sum + session.actualDurationSeconds, 0);
 }

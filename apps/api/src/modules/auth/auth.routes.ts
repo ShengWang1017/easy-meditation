@@ -100,11 +100,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
     const input = parsed.data;
     const tokenHash = hashRefreshToken(input.refreshToken);
+    const now = new Date();
     const stored = await prisma.refreshToken.findFirst({
       where: {
-        tokenHash,
-        revokedAt: null,
-        expiresAt: { gt: new Date() }
+        tokenHash
       },
       include: { user: true }
     });
@@ -116,12 +115,30 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       });
     }
 
-    await prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() }
+    const tokens = await prisma.$transaction(async (tx) => {
+      const revoked = await tx.refreshToken.updateMany({
+        where: {
+          id: stored.id,
+          revokedAt: null,
+          expiresAt: { gt: now }
+        },
+        data: { revokedAt: now }
+      });
+
+      if (revoked.count !== 1) {
+        return null;
+      }
+
+      return issueTokenPair(app, stored.user, tx);
     });
 
-    const tokens = await issueTokenPair(app, stored.user);
+    if (!tokens) {
+      return reply.code(401).send({
+        data: null,
+        error: { code: 'INVALID_REFRESH_TOKEN', message: 'Please log in again.' }
+      });
+    }
+
     return { data: tokenPairSchema.parse(tokens), error: null };
   });
 
