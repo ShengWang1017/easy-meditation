@@ -9,7 +9,18 @@ const secureStore = vi.hoisted(() => ({
   deleteItemAsync: vi.fn()
 }));
 
+vi.mock('expo-constants', () => ({
+  default: {
+    expoConfig: null,
+    manifest2: null
+  }
+}));
+
 vi.mock('expo-secure-store', () => secureStore);
+
+vi.mock('react-native', () => ({
+  Platform: { OS: 'ios' }
+}));
 
 describe('useAuthStore', () => {
   beforeEach(() => {
@@ -80,6 +91,28 @@ describe('useAuthStore', () => {
     });
   });
 
+  it('clears local auth state when secure storage read fails during restore', async () => {
+    useAuthStore.setState({
+      accessToken: 'stale-access',
+      refreshToken: 'stale-refresh',
+      isRestoring: true
+    });
+    secureStore.getItemAsync.mockRejectedValue(new Error('secure store unavailable'));
+    const refreshSpy = vi.spyOn(authApi, 'refresh').mockResolvedValue({
+      accessToken: 'unused-access',
+      refreshToken: 'unused-refresh'
+    });
+
+    await expect(useAuthStore.getState().restore()).resolves.toBeUndefined();
+
+    expect(refreshSpy).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isRestoring: false
+    });
+  });
+
   it('stores tokens after registration', async () => {
     const input: AuthRegisterInput = {
       email: 'new@example.com',
@@ -112,15 +145,36 @@ describe('useAuthStore', () => {
     });
   });
 
-  it('deletes the persisted refresh token on logout', async () => {
+  it('revokes the refresh token with the backend before local logout cleanup', async () => {
     useAuthStore.setState({
       accessToken: 'session-access',
       refreshToken: 'session-refresh',
       isRestoring: false
     });
+    vi.spyOn(authApi, 'logout').mockResolvedValue(undefined);
 
     await useAuthStore.getState().logout();
 
+    expect(authApi.logout).toHaveBeenCalledWith('session-refresh');
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isRestoring: false
+    });
+  });
+
+  it('still clears local auth state when backend logout revocation fails', async () => {
+    useAuthStore.setState({
+      accessToken: 'session-access',
+      refreshToken: 'session-refresh',
+      isRestoring: false
+    });
+    vi.spyOn(authApi, 'logout').mockRejectedValue(new Error('network down'));
+
+    await expect(useAuthStore.getState().logout()).resolves.toBeUndefined();
+
+    expect(authApi.logout).toHaveBeenCalledWith('session-refresh');
     expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,

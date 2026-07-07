@@ -25,6 +25,14 @@ export async function refresh(refreshToken: string): Promise<TokenPair> {
   });
 }
 
+export async function logout(refreshToken: string): Promise<void> {
+  await apiRequest<{ ok: true }>('/auth/logout', {
+    method: 'POST',
+    skipAuth: true,
+    body: JSON.stringify({ refreshToken })
+  });
+}
+
 export async function getMe(): Promise<Me> {
   return apiRequest<Me>('/me');
 }

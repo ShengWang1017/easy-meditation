@@ -38,13 +38,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
   async restore() {
-    const savedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-    if (!savedRefreshToken) {
-      set({ accessToken: null, refreshToken: null, isRestoring: false });
-      return;
-    }
-
     try {
+      const savedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      if (!savedRefreshToken) {
+        set({ accessToken: null, refreshToken: null, isRestoring: false });
+        return;
+      }
+
       const tokens = await authApi.refresh(savedRefreshToken);
       await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
       set({
@@ -53,7 +53,11 @@ export const useAuthStore = create<AuthState>((set) => ({
         isRestoring: false
       });
     } catch {
-      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      try {
+        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      } catch {
+        // Ignore secure storage cleanup failures so auth restore can still complete locally.
+      }
       set({
         accessToken: null,
         refreshToken: null,
@@ -62,6 +66,15 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
   async logout() {
+    const refreshToken = useAuthStore.getState().refreshToken;
+    if (refreshToken) {
+      try {
+        await authApi.logout(refreshToken);
+      } catch {
+        // Best-effort revocation: clear local state even if the network call fails.
+      }
+    }
+
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     set({
       accessToken: null,
