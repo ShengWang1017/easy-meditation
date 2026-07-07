@@ -53,7 +53,7 @@ export async function issueTokenPair(
   const refreshToken = createRefreshToken();
   const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
-  await prisma.refreshToken.create({
+  await db.refreshToken.create({
     data: {
       userId: user.id,
       tokenHash: hashRefreshToken(refreshToken),
