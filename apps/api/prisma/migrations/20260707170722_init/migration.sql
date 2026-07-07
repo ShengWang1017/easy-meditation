@@ -1,3 +1,9 @@
+-- CreateEnum
+CREATE TYPE "breathing_method_category" AS ENUM ('classic', 'system');
+
+-- CreateEnum
+CREATE TYPE "method_type" AS ENUM ('built_in', 'custom');
+
 -- CreateTable
 CREATE TABLE "users" (
     "id" UUID NOT NULL,
@@ -28,7 +34,7 @@ CREATE TABLE "breathing_methods" (
     "slug" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "subtitle" TEXT NOT NULL,
-    "category" TEXT NOT NULL,
+    "category" "breathing_method_category" NOT NULL,
     "default_duration_seconds" INTEGER NOT NULL,
     "phases" JSONB NOT NULL,
     "sort_order" INTEGER NOT NULL,
@@ -60,7 +66,7 @@ CREATE TABLE "practice_sessions" (
     "id" UUID NOT NULL,
     "client_session_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
-    "method_type" TEXT NOT NULL,
+    "method_type" "method_type" NOT NULL,
     "method_id" TEXT,
     "custom_rhythm_id" UUID,
     "method_title_snapshot" TEXT NOT NULL,
@@ -78,7 +84,7 @@ CREATE TABLE "practice_sessions" (
 -- CreateTable
 CREATE TABLE "user_settings" (
     "user_id" UUID NOT NULL,
-    "default_method_type" TEXT NOT NULL DEFAULT 'built_in',
+    "default_method_type" "method_type" NOT NULL DEFAULT 'built_in',
     "default_method_id" TEXT DEFAULT 'box',
     "default_custom_rhythm_id" UUID,
     "default_duration_seconds" INTEGER NOT NULL DEFAULT 180,
@@ -125,3 +131,9 @@ ALTER TABLE "practice_sessions" ADD CONSTRAINT "practice_sessions_custom_rhythm_
 
 -- AddForeignKey
 ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_default_method_id_fkey" FOREIGN KEY ("default_method_id") REFERENCES "breathing_methods"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_default_custom_rhythm_id_fkey" FOREIGN KEY ("default_custom_rhythm_id") REFERENCES "custom_rhythms"("id") ON DELETE SET NULL ON UPDATE CASCADE;

@@ -1,3 +1,4 @@
+import { BREATHING_METHODS_SEED, breathingMethodSchema, dataEnvelope } from '@easy-meditation/shared';
 import { describe, expect, test } from 'vitest';
 import { buildApp } from '../app.js';
 
@@ -17,10 +18,11 @@ describe('api app', () => {
     await app.close();
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().data.map((method: { id: string }) => method.id)).toEqual([
-      'box',
-      'four-seven-eight',
-      'coherent'
-    ]);
+
+    const body = dataEnvelope(breathingMethodSchema.array()).parse(response.json());
+    expect(body).toEqual({
+      data: BREATHING_METHODS_SEED,
+      error: null
+    });
   });
 });

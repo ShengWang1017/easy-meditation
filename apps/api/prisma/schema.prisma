@@ -7,6 +7,20 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum BreathingMethodCategory {
+  classic
+  system
+
+  @@map("breathing_method_category")
+}
+
+enum MethodType {
+  built_in
+  custom
+
+  @@map("method_type")
+}
+
 model User {
   id           String    @id @default(uuid()) @db.Uuid
   email        String    @unique
@@ -42,7 +56,7 @@ model BreathingMethod {
   slug                   String   @unique
   title                  String
   subtitle               String
-  category               String
+  category               BreathingMethodCategory
   defaultDurationSeconds Int      @map("default_duration_seconds")
   phases                 Json
   sortOrder              Int      @map("sort_order")
@@ -50,7 +64,8 @@ model BreathingMethod {
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
-  practiceSessions PracticeSession[]
+  practiceSessions  PracticeSession[] @relation("BuiltInMethodPracticeSessions")
+  defaultForUsers   UserSettings[]    @relation("DefaultBreathingMethod")
 
   @@map("breathing_methods")
 }
@@ -68,7 +83,8 @@ model CustomRhythm {
   deletedAt              DateTime? @map("deleted_at")
 
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  practiceSessions PracticeSession[]
+  practiceSessions PracticeSession[] @relation("CustomRhythmPracticeSessions")
+  defaultForUsers  UserSettings[]    @relation("DefaultCustomRhythm")
 
   @@index([userId])
   @@map("custom_rhythms")
@@ -78,7 +94,7 @@ model PracticeSession {
   id                     String   @id @default(uuid()) @db.Uuid
   clientSessionId        String   @unique @map("client_session_id") @db.Uuid
   userId                 String   @map("user_id") @db.Uuid
-  methodType             String   @map("method_type")
+  methodType             MethodType   @map("method_type")
   methodId               String?  @map("method_id")
   customRhythmId         String?  @map("custom_rhythm_id") @db.Uuid
   methodTitleSnapshot    String   @map("method_title_snapshot")
@@ -91,8 +107,8 @@ model PracticeSession {
   createdAt              DateTime @default(now()) @map("created_at")
 
   user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  method       BreathingMethod? @relation(fields: [methodId], references: [id])
-  customRhythm CustomRhythm?    @relation(fields: [customRhythmId], references: [id])
+  method       BreathingMethod? @relation("BuiltInMethodPracticeSessions", fields: [methodId], references: [id])
+  customRhythm CustomRhythm?    @relation("CustomRhythmPracticeSessions", fields: [customRhythmId], references: [id])
 
   @@index([userId, endedAt])
   @@map("practice_sessions")
@@ -100,7 +116,7 @@ model PracticeSession {
 
 model UserSettings {
   userId                 String   @id @map("user_id") @db.Uuid
-  defaultMethodType      String   @default("built_in") @map("default_method_type")
+  defaultMethodType      MethodType   @default(built_in) @map("default_method_type")
   defaultMethodId        String?  @default("box") @map("default_method_id")
   defaultCustomRhythmId  String?  @map("default_custom_rhythm_id") @db.Uuid
   defaultDurationSeconds Int      @default(180) @map("default_duration_seconds")
@@ -109,7 +125,9 @@ model UserSettings {
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultMethod        BreathingMethod?  @relation("DefaultBreathingMethod", fields: [defaultMethodId], references: [id], onDelete: SetNull)
+  defaultCustomRhythm  CustomRhythm?     @relation("DefaultCustomRhythm", fields: [defaultCustomRhythmId], references: [id], onDelete: SetNull)
 
   @@map("user_settings")
 }
