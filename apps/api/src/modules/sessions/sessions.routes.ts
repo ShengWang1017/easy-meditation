@@ -5,6 +5,7 @@ import {
   practiceSessionSchema
 } from '@easy-meditation/shared';
 import { prisma } from '../../db.js';
+import { isPrismaUniqueConstraintError } from '../auth/auth.service.js';
 
 export function mapSession(session: Pick<
   PracticeSession,
@@ -70,23 +71,45 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       return { data: mapSession(existing), error: null };
     }
 
-    const session = await prisma.practiceSession.create({
-      data: {
-        clientSessionId: input.clientSessionId,
-        userId: request.user.sub,
-        methodType: input.methodType,
-        methodId: input.methodId,
-        customRhythmId: input.customRhythmId,
-        methodTitleSnapshot: input.methodTitleSnapshot,
-        rhythmSnapshot: input.rhythmSnapshot,
-        plannedDurationSeconds: input.plannedDurationSeconds,
-        actualDurationSeconds: input.actualDurationSeconds,
-        completed: input.completed,
-        startedAt: new Date(input.startedAt),
-        endedAt: new Date(input.endedAt)
-      }
-    });
+    try {
+      const session = await prisma.practiceSession.create({
+        data: {
+          clientSessionId: input.clientSessionId,
+          userId: request.user.sub,
+          methodType: input.methodType,
+          methodId: input.methodId,
+          customRhythmId: input.customRhythmId,
+          methodTitleSnapshot: input.methodTitleSnapshot,
+          rhythmSnapshot: input.rhythmSnapshot,
+          plannedDurationSeconds: input.plannedDurationSeconds,
+          actualDurationSeconds: input.actualDurationSeconds,
+          completed: input.completed,
+          startedAt: new Date(input.startedAt),
+          endedAt: new Date(input.endedAt)
+        }
+      });
 
-    return reply.code(201).send({ data: mapSession(session), error: null });
+      return reply.code(201).send({ data: mapSession(session), error: null });
+    } catch (error) {
+      if (!isPrismaUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      const racedSession = await prisma.practiceSession.findUniqueOrThrow({
+        where: { clientSessionId: input.clientSessionId }
+      });
+
+      if (racedSession.userId !== request.user.sub) {
+        return reply.code(409).send({
+          data: null,
+          error: {
+            code: 'PRACTICE_SESSION_CONFLICT',
+            message: 'This session belongs to another user.'
+          }
+        });
+      }
+
+      return reply.code(200).send({ data: mapSession(racedSession), error: null });
+    }
   });
 }

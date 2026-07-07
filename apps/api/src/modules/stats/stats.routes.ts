@@ -6,18 +6,27 @@ import { deriveCurrentStreak, deriveWeeklyPracticeSeconds } from './stats.servic
 
 export async function registerStatsRoutes(app: FastifyInstance) {
   app.get('/stats/summary', { preHandler: [app.authenticate] }, async (request) => {
-    const sessions = await prisma.practiceSession.findMany({
-      where: { userId: request.user.sub },
-      orderBy: { endedAt: 'desc' },
-      take: 200
-    });
+    const [sessions, totalSessions, durationAggregate] = await prisma.$transaction([
+      prisma.practiceSession.findMany({
+        where: { userId: request.user.sub },
+        orderBy: { endedAt: 'desc' },
+        take: 200
+      }),
+      prisma.practiceSession.count({
+        where: { userId: request.user.sub }
+      }),
+      prisma.practiceSession.aggregate({
+        where: { userId: request.user.sub },
+        _sum: { actualDurationSeconds: true }
+      })
+    ]);
 
     const recentSessions = sessions.slice(0, 10).map(mapSession);
 
     return {
       data: statsSummarySchema.parse({
-        totalSessions: sessions.length,
-        totalPracticeSeconds: sessions.reduce((sum, session) => sum + session.actualDurationSeconds, 0),
+        totalSessions,
+        totalPracticeSeconds: durationAggregate._sum.actualDurationSeconds ?? 0,
         weeklyPracticeSeconds: deriveWeeklyPracticeSeconds(sessions),
         currentStreak: deriveCurrentStreak(sessions),
         recentSessions

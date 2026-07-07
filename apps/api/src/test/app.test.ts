@@ -8,19 +8,30 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function registerTestUser(app: Awaited<ReturnType<typeof buildApp>>) {
+async function registerTestAccount(app: Awaited<ReturnType<typeof buildApp>>) {
+  const email = `session-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
   const response = await app.inject({
     method: 'POST',
     url: '/auth/register',
     payload: {
-      email: `session-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`,
+      email,
       password: 'quiet-breathing-123',
       nickname: 'Session Tester'
     }
   });
 
   expect(response.statusCode).toBe(201);
-  return response.json().data.tokens.accessToken as string;
+  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+
+  return {
+    accessToken: response.json().data.tokens.accessToken as string,
+    userId: user.id
+  };
+}
+
+async function registerTestUser(app: Awaited<ReturnType<typeof buildApp>>) {
+  const account = await registerTestAccount(app);
+  return account.accessToken;
 }
 
 describe('api app', () => {
@@ -185,7 +196,7 @@ describe('practice sessions and stats', () => {
     const clientSessionId = crypto.randomUUID();
     const payload = {
       clientSessionId,
-      methodType: 'built_in',
+      methodType: 'built_in' as const,
       methodId: 'box',
       customRhythmId: null,
       methodTitleSnapshot: '鐩掑紡鍛煎惛',
@@ -289,7 +300,7 @@ describe('practice sessions and stats', () => {
     const clientSessionId = crypto.randomUUID();
     const payload = {
       clientSessionId,
-      methodType: 'built_in',
+      methodType: 'built_in' as const,
       methodId: 'box',
       customRhythmId: null,
       methodTitleSnapshot: 'Box breathing',
@@ -337,6 +348,100 @@ describe('practice sessions and stats', () => {
     expect(secondUserStats.json().data.totalSessions).toBe(0);
 
     await app.close();
+  });
+
+  test('returns the existing session when creation loses a same-user race on clientSessionId', async () => {
+    const app = await buildApp();
+    const { accessToken, userId } = await registerTestAccount(app);
+    const clientSessionId = crypto.randomUUID();
+    const payload = {
+      clientSessionId,
+      methodType: 'built_in',
+      methodId: 'box',
+      customRhythmId: null,
+      methodTitleSnapshot: 'Box breathing',
+      rhythmSnapshot: [
+        { kind: 'inhale', label: 'Inhale', durationSeconds: 4 },
+        { kind: 'hold', label: 'Hold', durationSeconds: 4 },
+        { kind: 'exhale', label: 'Exhale', durationSeconds: 4 },
+        { kind: 'hold', label: 'Hold', durationSeconds: 4 }
+      ],
+      plannedDurationSeconds: 180,
+      actualDurationSeconds: 180,
+      completed: true,
+      startedAt: new Date('2026-07-07T11:00:00.000Z').toISOString(),
+      endedAt: new Date('2026-07-07T11:03:00.000Z').toISOString()
+    };
+
+    const existing = await prisma.practiceSession.create({
+      data: {
+        ...payload,
+        methodType: 'built_in' as const,
+        userId,
+        startedAt: new Date(payload.startedAt),
+        endedAt: new Date(payload.endedAt)
+      }
+    });
+
+    const findUniqueSpy = vi.spyOn(prisma.practiceSession, 'findUnique').mockResolvedValueOnce(null as never);
+    const createSpy = vi.spyOn(prisma.practiceSession, 'create').mockRejectedValueOnce(
+      Object.assign(new Error('Unique constraint failed on the fields: (`client_session_id`)'), {
+        code: 'P2002'
+      })
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/practice-sessions',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload
+    });
+
+    createSpy.mockRestore();
+    findUniqueSpy.mockRestore();
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.id).toBe(existing.id);
+  });
+
+  test('computes summary totals from all authenticated user sessions, not only the recent window', async () => {
+    const app = await buildApp();
+    const { accessToken, userId } = await registerTestAccount(app);
+
+    await prisma.practiceSession.createMany({
+      data: Array.from({ length: 205 }, (_, index) => ({
+        clientSessionId: crypto.randomUUID(),
+        userId,
+        methodType: 'built_in' as const,
+        methodId: 'box',
+        customRhythmId: null,
+        methodTitleSnapshot: 'Box breathing',
+        rhythmSnapshot: [
+          { kind: 'inhale', label: 'Inhale', durationSeconds: 4 },
+          { kind: 'hold', label: 'Hold', durationSeconds: 4 },
+          { kind: 'exhale', label: 'Exhale', durationSeconds: 4 },
+          { kind: 'hold', label: 'Hold', durationSeconds: 4 }
+        ],
+        plannedDurationSeconds: 180,
+        actualDurationSeconds: 1,
+        completed: true,
+        startedAt: new Date(Date.UTC(2026, 6, 1, 0, index, 0)),
+        endedAt: new Date(Date.UTC(2026, 6, 1, 0, index, 30))
+      }))
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/stats/summary',
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.totalSessions).toBe(205);
+    expect(response.json().data.totalPracticeSeconds).toBe(205);
+    expect(response.json().data.recentSessions).toHaveLength(10);
   });
 });
 
