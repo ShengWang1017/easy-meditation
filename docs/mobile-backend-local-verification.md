@@ -8,8 +8,8 @@ Branch: `codex/mobile-backend-vertical-slice`
 
 - `npm test`
   - Passed.
-  - API: 12 tests passed.
-  - Mobile: 21 tests passed.
+  - API: 19 tests passed.
+  - Mobile: 23 tests passed.
   - Shared: 10 tests passed.
 - `npm run typecheck --workspaces --if-present`
   - Passed for `apps/api`, `apps/mobile`, and `packages/shared`.
@@ -25,11 +25,13 @@ Recorded verification commands run:
 - `docker compose ps`
 - `npm --workspace apps/api run prisma:migrate`
 - `npm --workspace apps/api run prisma:seed`
-- `Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','dev:api' -WorkingDirectory (Get-Location) -WindowStyle Hidden -RedirectStandardOutput '.superpowers/sdd/logs/task8-api.stdout.log' -RedirectStandardError '.superpowers/sdd/logs/task8-api.stderr.log' -PassThru`
+- `npm --workspace apps/api run build`
+- `Start-Process -FilePath 'npm.cmd' -ArgumentList '--workspace','apps/api','run','start' -WorkingDirectory (Get-Location) -WindowStyle Hidden -RedirectStandardOutput '.superpowers/sdd/logs/final-api-start.stdout.log' -RedirectStandardError '.superpowers/sdd/logs/final-api-start.stderr.log' -PassThru`
 
 Human-facing equivalent:
 
-- `npm run dev:api`
+- `npm --workspace apps/api run build`
+- `npm --workspace apps/api run start`
 
 Observed result:
 
@@ -40,11 +42,11 @@ Observed result:
 
 Background process state:
 
-- API process left running intentionally for local follow-up testing.
+- API process left running intentionally for local follow-up testing from the built output.
 - Listener: `0.0.0.0:4000`
-- Owning PID: `38868`
-- Stdout log: `.superpowers/sdd/logs/task8-api.stdout.log`
-- Stderr log: `.superpowers/sdd/logs/task8-api.stderr.log`
+- Owning PID: `36844`
+- Stdout log: `.superpowers/sdd/logs/final-api-start.stdout.log`
+- Stderr log: `.superpowers/sdd/logs/final-api-start.stderr.log`
 
 ## API Endpoint Verification
 
@@ -99,13 +101,14 @@ Observed results:
   - `totalPracticeSeconds = 60`
   - `weeklyPracticeSeconds = 60`
   - `recentSessions.length = 1`
+- Invalid auth input was also checked with `curl.exe` against `/auth/register`; it returned HTTP `400` with `error.code = VALIDATION_ERROR`.
 
 ## Expo / Mobile Boot Verification
 
 Recorded verification command run:
 
 ```powershell
-Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-Command',"`$env:EXPO_PUBLIC_API_BASE_URL='http://127.0.0.1:4000'; npm.cmd run dev:mobile -- --non-interactive" -WorkingDirectory (Get-Location) -WindowStyle Hidden -RedirectStandardOutput '.superpowers/sdd/logs/task8-mobile.stdout.log' -RedirectStandardError '.superpowers/sdd/logs/task8-mobile.stderr.log' -PassThru
+Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-Command',"`$env:EXPO_PUBLIC_API_BASE_URL='http://127.0.0.1:4000'; npm.cmd run dev:mobile -- --non-interactive" -WorkingDirectory (Get-Location) -WindowStyle Hidden -RedirectStandardOutput '.superpowers/sdd/logs/final-mobile.stdout.log' -RedirectStandardError '.superpowers/sdd/logs/final-mobile.stderr.log' -PassThru
 ```
 
 Human-facing equivalent:
@@ -123,11 +126,11 @@ Observed result:
 
 Background process state:
 
-- Launcher PID: `35036`
-- Metro listener PID: `40628`
+- Launcher PID: `32552`
+- Metro listener PID: `7220`
 - URL: `http://localhost:8081`
-- Stdout log: `.superpowers/sdd/logs/task8-mobile.stdout.log`
-- Stderr log: `.superpowers/sdd/logs/task8-mobile.stderr.log`
+- Stdout log: `.superpowers/sdd/logs/final-mobile.stdout.log`
+- Stderr log: `.superpowers/sdd/logs/final-mobile.stderr.log`
 
 ## Manual Limitations
 
