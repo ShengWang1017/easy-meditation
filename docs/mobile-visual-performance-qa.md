@@ -1,6 +1,7 @@
 # Mobile Visual And Performance QA
 
-Status: **host-only foundation complete; visual and performance acceptance not run**.
+Status: **host foundation and deterministic Web fixture driver complete; visual
+and performance acceptance not run**.
 
 This document describes the deterministic tooling currently present in the
 repository and the work still required before any screenshot or frame-rate
@@ -8,8 +9,8 @@ result can be called acceptance evidence.
 
 ## What Exists Now
 
-- `qa/fixtures/mobile-prototype.json` is one synthetic payload shared by the
-  future Web and native adapters. It fixes time at
+- `qa/fixtures/mobile-prototype.json` is one synthetic payload read directly by
+  the Web driver and reserved for the native adapter. It fixes time at
   `2026-07-10T12:00:00+08:00`, contains a `.invalid` user, the three built-in
   methods, empty/populated records, user-scoped preferences, one local custom
   ledger row, and explicit auth/session state for all 13 capture states.
@@ -19,6 +20,17 @@ result can be called acceptance evidence.
   API-key, private-key, and client-secret key families.
 - `scripts/visual-qa/states.mjs` defines the exact Web/native URLs and element
   manifests for the 13 states.
+- `src/ui/visual-qa-fixture.js` accepts only an explicit loopback
+  `visualQaState` query, drives the 11 states with approved Web references from
+  fixed clocks, storage, methods, session progress, and records, and leaves the
+  normal application path unchanged. Static fixture rendering uses injected
+  scheduling and cue ports, so it starts no live timer or audio runtime.
+- The Web driver measures every required `data-od-id` exactly once after two
+  animation frames and emits `VISUAL_QA_READY` with element rectangles and
+  typography metadata. Missing or duplicate IDs fail closed with
+  `VISUAL_QA_ERROR`. `login` and `register` are deliberately native-only: their
+  Web URLs show and emit an explicit unsupported diagnostic and never emit
+  READY.
 - The comparison engine normalizes safe-area coordinates, aligns horizontal
   centers, masks the union of Web/native text rectangles, writes a 50% overlay
   and pixel diff, and evaluates geometry, typography, and exact-check gates.
@@ -36,6 +48,7 @@ Run the completed host checks with:
 
 ```bash
 npm run qa:fixture:validate
+npm run test:web
 npm run test:tooling
 ```
 
@@ -95,7 +108,7 @@ This foundation pass did **not**:
 - generate iOS/Android native projects or run release builds;
 - measure FPS, audio, lifecycle, offline retry, or account isolation on a
   device;
-- wire the JSON fixture into the production-shaped application.
+- wire the JSON fixture into the native production-shaped application.
 
 Direct `qa:visual:web` and `qa:visual:compare` execution currently exits
 nonzero rather than pretending a capture occurred. Native capture commands
@@ -103,10 +116,10 @@ also require all explicit selectors and paths before they can execute.
 
 ## Remaining Blockers And Required Follow-up
 
-1. Integrate the final focus-session and records work, then add a development-
-   only native fixture provider, registered measurement refs/text-layout
-   metadata, Web fixture driver, and frozen clocks/animations. Production must
-   ignore fixture requests even when an environment flag is present.
+1. Add a development-only native fixture provider, registered measurement
+   refs/text-layout metadata, and frozen clocks/animations. Native production
+   builds must ignore fixture requests even when an environment flag is
+   present.
 2. Obtain explicit user authorization for deterministic browser capture. The
    repository has `@playwright/test` as a host dependency, but no browser was
    installed in this pass. A clean ephemeral browser exception is preferable

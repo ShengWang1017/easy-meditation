@@ -15,9 +15,9 @@ const DEFAULT_CUSTOM_SETTINGS = {
   durationMinutes: BREATHING_METHODS.custom.defaultMinutes
 };
 
-function createDefaultMethodDurations() {
+function createDefaultMethodDurations(methods) {
   return Object.fromEntries(
-    Object.values(BREATHING_METHODS).map((method) => [method.id, method.defaultMinutes])
+    Object.values(methods).map((method) => [method.id, method.defaultMinutes])
   );
 }
 
@@ -29,24 +29,51 @@ function normalizeMinutes(minutes, fallback) {
 
 export function createMeditationState(options = {}) {
   const now = options.now ?? (() => Date.now());
-  const store = createPracticeStore(options.storage);
+  const store = createPracticeStore(options.storage, {
+    dateAdapter: options.dateAdapter
+  });
   const cuePlayer = options.cuePlayer ?? createNoopCuePlayer();
-  const methodDurations = createDefaultMethodDurations();
+  const methods = options.methods ?? BREATHING_METHODS;
+  const initialization = options.initialization ?? {};
+  const methodDurations = createDefaultMethodDurations(methods);
   methodDurations.box = normalizeMinutes(options.initialDurationMinutes ?? methodDurations.box, methodDurations.box);
+  for (const [methodId, minutes] of Object.entries(initialization.methodDurations ?? {})) {
+    if (methods[methodId]) {
+      methodDurations[methodId] = normalizeMinutes(minutes, methodDurations[methodId]);
+    }
+  }
+  const customSettings = {
+    ...DEFAULT_CUSTOM_SETTINGS,
+    ...initialization.customSettings
+  };
+  const initialMethod = methods[initialization.methodId] ?? methods.box;
+  const initialDurationMinutes = normalizeMinutes(
+    initialization.durationMinutes ?? methodDurations[initialMethod.id],
+    methodDurations[initialMethod.id]
+  );
+  const initialElapsedSeconds = Math.max(
+    0,
+    Math.floor(initialization.elapsedSeconds ?? 0)
+  );
+  const initialStatus = initialization.status ?? 'idle';
   const state = {
-    method: BREATHING_METHODS.box,
-    durationMinutes: methodDurations.box,
-    status: 'idle',
-    elapsedBeforeRun: 0,
-    runStartedAt: 0,
-    controlsOpen: false,
+    method: initialMethod,
+    durationMinutes: initialDurationMinutes,
+    status: initialStatus,
+    elapsedBeforeRun:
+      initialStatus === 'running' ? 0 : initialElapsedSeconds,
+    runStartedAt:
+      initialStatus === 'running'
+        ? now() - initialElapsedSeconds * 1000
+        : 0,
+    controlsOpen: initialization.controlsOpen ?? false,
     soundEnabled: options.audioEnabled ?? true,
-    page: 'meditation',
-    view: 'modeSelection',
-    beforeCardVisible: true,
+    page: initialization.page ?? 'meditation',
+    view: initialization.view ?? 'modeSelection',
+    beforeCardVisible: initialization.beforeCardVisible ?? true,
     lastCueKey: '',
     methodDurations,
-    customSettings: { ...DEFAULT_CUSTOM_SETTINGS }
+    customSettings
   };
 
   function elapsedSeconds() {
@@ -83,7 +110,7 @@ export function createMeditationState(options = {}) {
       view: state.page === 'records' || state.page === 'guide' ? state.page : state.view,
       beforeCardVisible: state.beforeCardVisible,
       pages: PAGES,
-      availableModes: Object.values(BREATHING_METHODS).map((availableMethod) => ({
+      availableModes: Object.values(methods).map((availableMethod) => ({
         ...availableMethod,
         defaultMinutes: getModeDuration(availableMethod.id)
       })),
@@ -126,7 +153,7 @@ export function createMeditationState(options = {}) {
   }
 
   function selectMode(methodId) {
-    state.method = BREATHING_METHODS[methodId] ?? state.method;
+    state.method = methods[methodId] ?? state.method;
     state.durationMinutes = getModeDuration(state.method.id);
     state.page = 'meditation';
     state.view = state.method.id === 'custom' ? 'custom' : 'focus';
@@ -148,7 +175,7 @@ export function createMeditationState(options = {}) {
   }
 
   function setModeDuration(methodId, minutes) {
-    const method = BREATHING_METHODS[methodId];
+    const method = methods[methodId];
     if (!method) return getSnapshot();
     const nextMinutes = normalizeMinutes(minutes, getModeDuration(methodId));
     state.methodDurations[methodId] = nextMinutes;
@@ -188,7 +215,7 @@ export function createMeditationState(options = {}) {
   }
 
   function startCustomSession() {
-    state.method = BREATHING_METHODS.custom;
+    state.method = methods.custom;
     state.durationMinutes = state.customSettings.durationMinutes;
     state.methodDurations.custom = state.durationMinutes;
     state.page = 'meditation';
@@ -306,12 +333,14 @@ export function createMeditationState(options = {}) {
   }
 
   function getActiveMethod() {
-    if (state.method.id === 'custom') return getCustomMethod(state.customSettings);
+    if (state.method.id === 'custom') {
+      return getCustomMethod(methods.custom, state.customSettings);
+    }
     return state.method;
   }
 
   function getModeDuration(methodId) {
-    return state.methodDurations[methodId] ?? BREATHING_METHODS[methodId]?.defaultMinutes ?? state.durationMinutes;
+    return state.methodDurations[methodId] ?? methods[methodId]?.defaultMinutes ?? state.durationMinutes;
   }
 
   return {
@@ -340,9 +369,9 @@ export function createMeditationState(options = {}) {
   };
 }
 
-function getCustomMethod(settings) {
+function getCustomMethod(baseMethod, settings) {
   return {
-    ...BREATHING_METHODS.custom,
+    ...baseMethod,
     rhythmLabel: `${settings.inhale}-${settings.hold}-${settings.exhale}`,
     phases: [
       { kind: 'inhale', label: '吸气', durationSeconds: settings.inhale },

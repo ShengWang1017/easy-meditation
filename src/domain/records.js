@@ -1,4 +1,26 @@
 const STORAGE_KEY = 'easy-meditation.records.v1';
+const DAY_MS = 24 * 60 * 60 * 1000;
+const LOCAL_DATE_ADAPTER = {
+  startOfDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  },
+  addDays(date, days) {
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate() + days
+    );
+  },
+  dateKey(date) {
+    return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+  },
+  dayOfMonth(date) {
+    return date.getDate();
+  },
+  formatMonthDay(date) {
+    return `${date.getMonth() + 1}月${date.getDate()}日`;
+  }
+};
 
 export function createMemoryStorage() {
   const values = new Map();
@@ -15,7 +37,8 @@ export function createMemoryStorage() {
   };
 }
 
-export function createPracticeStore(storage = safeStorage()) {
+export function createPracticeStore(storage = safeStorage(), options = {}) {
+  const dateAdapter = options.dateAdapter ?? LOCAL_DATE_ADAPTER;
   function getRecords() {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return [];
@@ -37,7 +60,7 @@ export function createPracticeStore(storage = safeStorage()) {
   return {
     getRecords,
     getStats(now = new Date()) {
-      return derivePracticeStats(getRecords(), now);
+      return derivePracticeStats(getRecords(), now, dateAdapter);
     },
     addCompletedSession(input, completedAt = new Date()) {
       const completedDate = completedAt instanceof Date ? completedAt : new Date(completedAt);
@@ -58,9 +81,15 @@ export function createPracticeStore(storage = safeStorage()) {
   };
 }
 
-export function derivePracticeStats(records, now = new Date()) {
+export function derivePracticeStats(
+  records,
+  now = new Date(),
+  dateAdapter = LOCAL_DATE_ADAPTER
+) {
   const sorted = [...records].sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt));
-  const weekStartMs = startOfLocalDay(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000)).getTime();
+  const weekStartMs = dateAdapter
+    .addDays(dateAdapter.startOfDay(now), -6)
+    .getTime();
   const weeklySeconds = sorted
     .filter((record) => Date.parse(record.completedAt) >= weekStartMs)
     .reduce((sum, record) => sum + recordDurationSeconds(record), 0);
@@ -74,32 +103,78 @@ export function derivePracticeStats(records, now = new Date()) {
     weeklySeconds,
     weeklyMinutes: secondsToRoundedMinutes(weeklySeconds),
     weeklyDurationLabel: durationLabel(weeklySeconds),
-    currentStreak: calculateCurrentStreak(sorted, now),
-    calendarDays: deriveCalendarDays(sorted, now),
-    recentRecords: sorted.slice(0, 5).map((record) => enrichRecordDuration(record))
+    currentStreak: calculateCurrentStreak(sorted, now, dateAdapter),
+    calendarDays: deriveCalendarDays(sorted, now, 28, dateAdapter),
+    recentRecords: sorted
+      .slice(0, 5)
+      .map((record) => enrichRecordDuration(record, dateAdapter))
   };
 }
 
-function deriveCalendarDays(records, now, dayCount = 28) {
+export function createFixedOffsetDateAdapter(timeZoneOffsetMinutes) {
+  if (!Number.isFinite(timeZoneOffsetMinutes)) {
+    throw new TypeError('timeZoneOffsetMinutes must be finite.');
+  }
+  const offsetMs = timeZoneOffsetMinutes * 60 * 1000;
+  const shifted = (date) => new Date(date.getTime() + offsetMs);
+  return Object.freeze({
+    timeZoneOffsetMinutes,
+    startOfDay(date) {
+      const value = shifted(date);
+      return new Date(
+        Date.UTC(
+          value.getUTCFullYear(),
+          value.getUTCMonth(),
+          value.getUTCDate()
+        ) - offsetMs
+      );
+    },
+    addDays(date, days) {
+      return new Date(date.getTime() + days * DAY_MS);
+    },
+    dateKey(date) {
+      const value = shifted(date);
+      return [
+        value.getUTCFullYear(),
+        String(value.getUTCMonth() + 1).padStart(2, '0'),
+        String(value.getUTCDate()).padStart(2, '0')
+      ].join('-');
+    },
+    dayOfMonth(date) {
+      return shifted(date).getUTCDate();
+    },
+    formatMonthDay(date) {
+      const value = shifted(date);
+      return `${value.getUTCMonth() + 1}月${value.getUTCDate()}日`;
+    }
+  });
+}
+
+function deriveCalendarDays(
+  records,
+  now,
+  dayCount = 28,
+  dateAdapter = LOCAL_DATE_ADAPTER
+) {
   const secondsByDay = new Map();
   const sessionsByDay = new Map();
   records.forEach((record) => {
-    const key = localDateKey(new Date(record.completedAt));
+    const key = dateAdapter.dateKey(new Date(record.completedAt));
     secondsByDay.set(key, (secondsByDay.get(key) ?? 0) + recordDurationSeconds(record));
     sessionsByDay.set(key, (sessionsByDay.get(key) ?? 0) + 1);
   });
 
-  const today = startOfLocalDay(now);
-  const firstDay = new Date(today.getTime() - (dayCount - 1) * 24 * 60 * 60 * 1000);
+  const today = dateAdapter.startOfDay(now);
+  const firstDay = dateAdapter.addDays(today, -(dayCount - 1));
   return Array.from({ length: dayCount }, (_, index) => {
-    const date = new Date(firstDay.getTime() + index * 24 * 60 * 60 * 1000);
-    const key = localDateKey(date);
+    const date = dateAdapter.addDays(firstDay, index);
+    const key = dateAdapter.dateKey(date);
     const durationSeconds = secondsByDay.get(key) ?? 0;
     const minutes = durationSeconds / 60;
     return {
       key,
-      day: date.getDate(),
-      label: `${date.getMonth() + 1}月${date.getDate()}日`,
+      day: dateAdapter.dayOfMonth(date),
+      label: dateAdapter.formatMonthDay(date),
       durationSeconds,
       durationLabel: durationLabel(durationSeconds),
       minutes,
@@ -133,11 +208,15 @@ function recordDurationSeconds(record) {
   return normalizeDurationSeconds(record);
 }
 
-function enrichRecordDuration(record) {
+function enrichRecordDuration(record, dateAdapter = LOCAL_DATE_ADAPTER) {
   const durationSeconds = recordDurationSeconds(record);
+  const completedDate = new Date(record.completedAt);
   return {
     ...record,
     durationSeconds,
+    completedDateLabel: Number.isNaN(completedDate.getTime())
+      ? ''
+      : dateAdapter.formatMonthDay(completedDate),
     durationLabel: durationLabel(durationSeconds)
   };
 }
@@ -155,14 +234,16 @@ function durationLabel(seconds) {
   return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`;
 }
 
-function calculateCurrentStreak(records, now) {
-  const practiceDays = new Set(records.map((record) => localDateKey(new Date(record.completedAt))));
-  let cursor = startOfLocalDay(now);
+function calculateCurrentStreak(records, now, dateAdapter = LOCAL_DATE_ADAPTER) {
+  const practiceDays = new Set(
+    records.map((record) => dateAdapter.dateKey(new Date(record.completedAt)))
+  );
+  let cursor = dateAdapter.startOfDay(now);
   let streak = 0;
 
-  while (practiceDays.has(localDateKey(cursor))) {
+  while (practiceDays.has(dateAdapter.dateKey(cursor))) {
     streak += 1;
-    cursor = new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
+    cursor = dateAdapter.addDays(cursor, -1);
   }
 
   return streak;
@@ -179,12 +260,4 @@ function safeStorage() {
   } catch {
     return createMemoryStorage();
   }
-}
-
-function startOfLocalDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function localDateKey(date) {
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }

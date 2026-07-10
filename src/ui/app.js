@@ -33,9 +33,15 @@ const MODE_PRESENTATION = {
 };
 
 export function createMeditationApp(root, options = {}) {
+  const runtime = options.runtime ?? createBrowserRuntime(
+    root.ownerDocument?.defaultView ?? globalThis.window
+  );
+  const cuePlayer =
+    options.cuePlayer ??
+    createCuePlayer({ enabled: options.audioEnabled ?? true });
   const app = createMeditationState({
     ...options,
-    cuePlayer: createCuePlayer({ enabled: options.audioEnabled ?? true })
+    cuePlayer
   });
   let timer = 0;
   let breathFrame = 0;
@@ -55,8 +61,8 @@ export function createMeditationApp(root, options = {}) {
   };
 
   function render() {
-    window.clearTimeout(timer);
-    window.cancelAnimationFrame(breathFrame);
+    runtime.clearTimeout(timer);
+    runtime.cancelAnimationFrame(breathFrame);
     const snapshot = app.getSnapshot();
     if (snapshot.view !== 'modeSelection') activeDurationMethodId = '';
     const screenClass = [
@@ -78,14 +84,14 @@ export function createMeditationApp(root, options = {}) {
     bindEvents();
     setupBreathRenderer(snapshot);
 
-    if (snapshot.status === 'running') {
+    if (snapshot.status === 'running' && !options.staticRendering) {
       scheduleFocusTick();
     }
   }
 
   function scheduleFocusTick() {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => {
+    runtime.clearTimeout(timer);
+    timer = runtime.setTimeout(() => {
       const snapshot = app.sync();
       if (snapshot.view !== 'focus' || snapshot.status !== 'running') {
         render();
@@ -106,13 +112,13 @@ export function createMeditationApp(root, options = {}) {
           <button class="icon-button" data-page="meditation" aria-label="返回呼吸训练首页">
             <img src="${STYLE_ASSET_PATH}/icon-back.png" alt="" aria-hidden="true" />
           </button>
-          <h1>呼吸训练</h1>
+          <h1 data-od-id="training-title">呼吸训练</h1>
           <button class="icon-button info-button" data-action="open-guide" aria-label="了解呼吸训练和冥想">
             <img src="${STYLE_ASSET_PATH}/icon-info.png" alt="" aria-hidden="true" />
           </button>
         </header>
         <section class="training-intro" data-od-id="training-intro">
-          <h2>选择要进行的呼吸训练。</h2>
+          <h2 data-od-id="training-intro-copy">选择要进行的呼吸训练。</h2>
         </section>
         ${renderModeSelection(snapshot)}
         ${renderNav(snapshot.page, snapshot.pages)}
@@ -201,15 +207,15 @@ export function createMeditationApp(root, options = {}) {
           <button class="icon-button" data-action="guide-back" aria-label="返回呼吸训练首页">
             <img src="${STYLE_ASSET_PATH}/icon-back.png" alt="" aria-hidden="true" />
           </button>
-          <h1>练习指南</h1>
+          <h1 data-od-id="guide-title">练习指南</h1>
           <span class="guide-header-spacer" aria-hidden="true"></span>
         </header>
         <div class="guide-copy" data-od-id="guide-copy">
-          <p class="guide-kicker">开始前读一小段就好</p>
-          <h2>呼吸训练让注意力有一个温柔的落点。</h2>
-          <div class="guide-panel">
+          <p class="guide-kicker" data-od-id="guide-kicker">开始前读一小段就好</p>
+          <h2 data-od-id="guide-heading">呼吸训练让注意力有一个温柔的落点。</h2>
+          <div class="guide-panel" data-od-id="guide-panel">
             <h3>它为什么有用</h3>
-            <p>有节奏地吸气、停留和呼气，会让身体从紧绷里慢慢退出来。你不需要“清空大脑”，只要一次次回到下一次呼吸。</p>
+            <p data-od-id="guide-panel-body">有节奏地吸气、停留和呼气，会让身体从紧绷里慢慢退出来。你不需要“清空大脑”，只要一次次回到下一次呼吸。</p>
           </div>
           <div class="guide-list" data-od-id="guide-list">
             <article>
@@ -242,15 +248,15 @@ export function createMeditationApp(root, options = {}) {
           <button class="focus-sound-button ${snapshot.soundEnabled ? '' : 'is-muted'}" data-action="focus-sound" aria-label="${snapshot.soundEnabled ? '关闭声音' : '打开声音'}">
             <img src="${STYLE_ASSET_PATH}/${snapshot.soundEnabled ? 'icon-sound-on.svg' : 'icon-sound-off.svg'}" alt="" aria-hidden="true" />
           </button>
-          <div class="focus-phase-readout" data-od-id="focus-title">
-            <strong>准备</strong>
+          <div class="focus-phase-readout">
+            <strong data-od-id="focus-title">准备</strong>
             <span>${snapshot.method.rhythmLabel}</span>
           </div>
           <div class="focus-stage breath-ready" data-od-id="breath-stage">
             ${renderBreathVisual('ready')}
           </div>
-          <div class="focus-timer" data-od-id="focus-duration">
-            <strong>${snapshot.focusDurationLabel}</strong>
+          <div class="focus-timer">
+            <strong data-od-id="focus-duration">${snapshot.focusDurationLabel}</strong>
             <span>${snapshot.method.title}</span>
           </div>
           <button class="focus-start" data-action="focus-start" data-od-id="focus-start">开始</button>
@@ -268,14 +274,14 @@ export function createMeditationApp(root, options = {}) {
           <img src="${STYLE_ASSET_PATH}/${snapshot.soundEnabled ? 'icon-sound-on.svg' : 'icon-sound-off.svg'}" alt="" aria-hidden="true" />
         </button>
         <div class="focus-phase-readout" aria-live="polite" data-od-id="focus-phase-readout">
-          <strong data-focus-phase-label>${isComplete ? '完成' : snapshot.phase.label}</strong>
+          <strong data-focus-phase-label data-od-id="focus-phase-copy">${isComplete ? '完成' : snapshot.phase.label}</strong>
           <span data-focus-phase-count ${phaseCountLabel ? '' : 'hidden'}>${phaseCountLabel}</span>
         </div>
         <div class="focus-stage breath-${snapshot.phase.kind}" data-od-id="breath-stage">
           ${renderBreathVisual(snapshot.phase.kind)}
         </div>
         <div class="focus-timer">
-          <strong data-focus-timer>${isComplete ? '完成' : secondsToLabel(snapshot.remainingInSession)}</strong>
+          <strong data-focus-timer data-od-id="focus-timer">${isComplete ? '完成' : secondsToLabel(snapshot.remainingInSession)}</strong>
           <span>${snapshot.method.title}</span>
         </div>
         <div class="focus-actions" data-od-id="focus-actions">
@@ -297,17 +303,21 @@ export function createMeditationApp(root, options = {}) {
   function setupBreathRenderer(snapshot) {
     const canvas = root.querySelector('[data-breath-canvas]');
     if (!canvas) return;
-    syncBreathTimeline(snapshot, { force: true });
-    drawBreathCanvas(canvas, breathTimeline, window.performance.now());
+    const initialNow = options.staticRendering
+      ? options.visualTimeMs ?? 0
+      : runtime.now();
+    syncBreathTimeline(snapshot, { force: true, now: initialNow });
+    drawBreathCanvas(canvas, breathTimeline, initialNow);
+    if (options.staticRendering) return;
     const renderFrame = (now) => {
       const activeCanvas = root.querySelector('[data-breath-canvas]');
       if (!activeCanvas) return;
       drawBreathCanvas(activeCanvas, breathTimeline, now);
       if (breathTimeline.running || breathTimeline.loop) {
-        breathFrame = window.requestAnimationFrame(renderFrame);
+        breathFrame = runtime.requestAnimationFrame(renderFrame);
       }
     };
-    breathFrame = window.requestAnimationFrame(renderFrame);
+    breathFrame = runtime.requestAnimationFrame(renderFrame);
   }
 
   function updateFocusDynamics(snapshot) {
@@ -338,7 +348,7 @@ export function createMeditationApp(root, options = {}) {
   }
 
   function syncBreathTimeline(snapshot, options = {}) {
-    const now = window.performance.now();
+    const now = options.now ?? runtime.now();
     const isIdle = snapshot.view === 'focus' && snapshot.status === 'idle';
     const isComplete = snapshot.phase?.kind === 'complete';
     const kind = isIdle ? 'ready' : getBreathVisualKind(snapshot);
@@ -389,11 +399,11 @@ export function createMeditationApp(root, options = {}) {
           <button class="custom-nav-back" data-action="custom-back" aria-label="返回呼吸训练首页" data-od-id="custom-back">
             <img src="${STYLE_ASSET_PATH}/icon-back.png" alt="" aria-hidden="true" />
           </button>
-          <h1 class="custom-title">设置呼吸方式</h1>
+          <h1 class="custom-title" data-od-id="custom-title">设置呼吸方式</h1>
         </header>
         <div class="custom-picker-panel" data-od-id="custom-panel">
           <div class="custom-cycle-row" data-od-id="custom-cycle-row">
-            <strong>每个周期的时间</strong>
+            <strong data-od-id="custom-cycle-label">每个周期的时间</strong>
             ${renderScrollWheel({
               type: 'cycle',
               values: CYCLE_SECOND_OPTIONS,
@@ -410,7 +420,7 @@ export function createMeditationApp(root, options = {}) {
           </div>
           <div class="custom-panel-divider" aria-hidden="true"></div>
           <div class="custom-target-row" data-od-id="custom-target-row">
-            <span>呼吸目标时间</span>
+            <span data-od-id="custom-target-label">呼吸目标时间</span>
             ${renderScrollWheel({
               type: 'duration',
               values: DURATIONS_MINUTES,
@@ -421,6 +431,7 @@ export function createMeditationApp(root, options = {}) {
             })}
           </div>
         </div>
+        <button class="custom-start-action" data-action="custom-start" data-od-id="custom-start">开始练习</button>
       </section>
     `;
   }
@@ -462,10 +473,10 @@ export function createMeditationApp(root, options = {}) {
         <div class="records-hero">
           <div class="headline compact">
             <span>练习记录</span>
-            <h1>轻轻记住坚持</h1>
+            <h1 data-od-id="records-title">轻轻记住坚持</h1>
           </div>
           <div class="records-total">
-            <strong>${snapshot.stats.completedDurationLabel}</strong>
+            <strong data-od-id="records-total">${snapshot.stats.completedDurationLabel}</strong>
             <span>累计时长</span>
           </div>
         </div>
@@ -481,7 +492,7 @@ export function createMeditationApp(root, options = {}) {
               <span class="record-mark" aria-hidden="true"></span>
               <span class="record-copy">
                 <strong>${record.methodTitle}</strong>
-                <small>${formatRecordDate(record.completedAt)}</small>
+                <small>${formatRecordDate(record)}</small>
               </span>
               <span class="record-minutes">${formatRecordDuration(record)}</span>
             </div>
@@ -523,8 +534,9 @@ export function createMeditationApp(root, options = {}) {
     `;
   }
 
-  function formatRecordDate(value) {
-    const date = new Date(value);
+  function formatRecordDate(record) {
+    if (record.completedDateLabel) return record.completedDateLabel;
+    const date = new Date(record.completedAt);
     if (Number.isNaN(date.getTime())) return '刚刚完成';
     return `${date.getMonth() + 1}月${date.getDate()}日`;
   }
@@ -708,7 +720,7 @@ export function createMeditationApp(root, options = {}) {
   }
 
   function focusDurationInput(methodId) {
-    window.setTimeout(() => {
+    runtime.setTimeout(() => {
       const input = root.querySelector(`[data-duration-input][data-method="${methodId}"]`);
       input?.focus();
       input?.select();
@@ -720,8 +732,8 @@ export function createMeditationApp(root, options = {}) {
       centerWheelOnValue(wheel);
       wheel.addEventListener('scroll', () => {
         if (wheel.dataset.programmaticScroll === 'true') return;
-        window.clearTimeout(wheelTimers.get(wheel));
-        wheelTimers.set(wheel, window.setTimeout(() => {
+        runtime.clearTimeout(wheelTimers.get(wheel));
+        wheelTimers.set(wheel, runtime.setTimeout(() => {
           commitWheelValue(wheel, getCenteredWheelValue(wheel));
         }, 110));
       });
@@ -748,9 +760,13 @@ export function createMeditationApp(root, options = {}) {
     if (!option) return;
     wheel.dataset.programmaticScroll = 'true';
     wheel.scrollTop = option.offsetTop - ((wheel.clientHeight - option.offsetHeight) / 2);
-    window.requestAnimationFrame(() => {
+    if (options.staticRendering) {
       delete wheel.dataset.programmaticScroll;
-    });
+    } else {
+      runtime.requestAnimationFrame(() => {
+        delete wheel.dataset.programmaticScroll;
+      });
+    }
   }
 
   function getCenteredWheelValue(wheel) {
@@ -789,10 +805,22 @@ export function createMeditationApp(root, options = {}) {
 
   render();
   return {
+    getSnapshot: app.getSnapshot,
+    render,
     destroy() {
-      window.clearTimeout(timer);
-      window.cancelAnimationFrame(breathFrame);
+      runtime.clearTimeout(timer);
+      runtime.cancelAnimationFrame(breathFrame);
     }
+  };
+}
+
+function createBrowserRuntime(view) {
+  return {
+    now: () => view.performance.now(),
+    setTimeout: view.setTimeout.bind(view),
+    clearTimeout: view.clearTimeout.bind(view),
+    requestAnimationFrame: view.requestAnimationFrame.bind(view),
+    cancelAnimationFrame: view.cancelAnimationFrame.bind(view)
   };
 }
 

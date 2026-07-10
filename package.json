@@ -10,7 +10,8 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present && npm run test:tooling",
+    "test": "npm run test --workspaces --if-present && npm run test:web && npm run test:tooling",
+    "test:web": "node --test src/domain/*.test.js src/ui/*.test.js",
     "pretest:tooling": "npm --prefix packages/shared run build",
     "test:tooling": "node --test scripts/visual-qa/*.test.mjs scripts/perf/*.test.mjs",
     "preqa:fixture:validate": "npm --prefix packages/shared run build",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
+    "jsdom": "20.0.3",
     "pixelmatch": "7.2.0",
     "pngjs": "7.0.0",
     "sharp": "0.35.3",
