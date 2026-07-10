@@ -9,11 +9,19 @@ const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
+const { assetExts, sourceExts } = config.resolver;
 
 config.watchFolders = [workspaceRoot];
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
+config.transformer.babelTransformerPath = require.resolve(
+  'react-native-svg-transformer/expo',
+);
+config.resolver.assetExts = assetExts.filter(
+  (extension) => extension !== 'svg',
+);
+config.resolver.sourceExts = [...sourceExts, 'svg'];
 
 module.exports = config;
