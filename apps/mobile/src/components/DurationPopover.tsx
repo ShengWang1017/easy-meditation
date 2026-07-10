@@ -206,6 +206,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 17,
     lineHeight: 20,
+    minHeight: layout.touchTarget,
     minWidth: 0,
     paddingHorizontal: 0,
     paddingVertical: 0,

@@ -184,6 +184,7 @@ export function createUserPreferencesStore(
 ): UserPreferencesStore {
   const defaults = cloneDefaultPreferences();
   const barrier = createAwaitableStateStorage(storage);
+  let dismissTail: Promise<void> = Promise.resolve();
   let hydrationError: unknown;
 
   const store = createStore<UserPreferencesState>()(
@@ -235,20 +236,24 @@ export function createUserPreferencesStore(
           set({ soundEnabled: validEnabled });
           await barrier.flush();
         },
-        async dismissBeforeStart() {
-          const previousDismissed = get().beforeStartDismissed;
-          set({ beforeStartDismissed: true });
-          try {
-            await barrier.flush();
-          } catch (error) {
-            set({ beforeStartDismissed: previousDismissed });
+        dismissBeforeStart() {
+          const dismissal = dismissTail.then(async () => {
+            const previousDismissed = get().beforeStartDismissed;
+            set({ beforeStartDismissed: true });
             try {
               await barrier.flush();
-            } catch {
-              // The failed dismissal did not replace the previously persisted value.
+            } catch (error) {
+              set({ beforeStartDismissed: previousDismissed });
+              try {
+                await barrier.flush();
+              } catch {
+                // The failed dismissal did not replace the previously persisted value.
+              }
+              throw error;
             }
-            throw error;
-          }
+          });
+          dismissTail = dismissal.catch(() => undefined);
+          return dismissal;
         },
         async putLedgerEntry(entry) {
           const validEntry = cloneLedgerEntry(localSessionLedgerEntrySchema.parse(entry));

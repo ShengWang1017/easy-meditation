@@ -122,7 +122,7 @@ function renderModeCard(model: ModeCardViewModel) {
 }
 
 describe('DurationPopover', () => {
-  it('uses a 44-point minimum target for the duration input container', () => {
+  it('uses a 44-point minimum target on the duration input itself', () => {
     const view = render(
       <DurationPopover
         methodTitle="盒式呼吸法"
@@ -132,18 +132,8 @@ describe('DurationPopover', () => {
       />
     );
     const input = view.getByLabelText('输入盒式呼吸法训练分钟数');
-    let inputWrap = input.parent;
-    while (
-      inputWrap &&
-      StyleSheet.flatten(inputWrap.props.style).minHeight === undefined
-    ) {
-      inputWrap = inputWrap.parent;
-    }
 
-    expect(inputWrap).not.toBeNull();
-    expect(StyleSheet.flatten(inputWrap!.props.style).minHeight).toBe(
-      layout.touchTarget
-    );
+    expect(StyleSheet.flatten(input.props.style).minHeight).toBe(layout.touchTarget);
   });
 
   it.each([

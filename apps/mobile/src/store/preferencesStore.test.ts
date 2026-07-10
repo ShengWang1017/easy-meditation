@@ -103,6 +103,41 @@ function createMemoryStorage(initial: Record<string, string> = {}) {
   return { storage, values, reads, writes, removals };
 }
 
+function createRejectableFirstWriteStorage() {
+  const memory = createMemoryStorage();
+  let rejectFirstWrite: (reason?: unknown) => void = () => {
+    throw new Error('The first write has not started.');
+  };
+  let markFirstWriteStarted: () => void = () => undefined;
+  const firstWriteStarted = new Promise<void>((resolve) => {
+    markFirstWriteStarted = resolve;
+  });
+  const firstWrite = new Promise<void>((_resolve, reject) => {
+    rejectFirstWrite = reject;
+  });
+  let writeAttempts = 0;
+  const storage: StateStorage = {
+    getItem: memory.storage.getItem,
+    async setItem(name, value) {
+      writeAttempts += 1;
+      memory.writes.push({ name, value });
+      if (writeAttempts === 1) {
+        markFirstWriteStarted();
+        await firstWrite;
+      }
+      memory.values.set(name, value);
+    },
+    removeItem: memory.storage.removeItem
+  };
+
+  return {
+    ...memory,
+    storage,
+    firstWriteStarted,
+    rejectFirstWrite
+  };
+}
+
 function readPersisted(storage: ReturnType<typeof createMemoryStorage>, userId: string) {
   const value = storage.values.get(preferencesStorageKey(userId));
   expect(value).toBeDefined();
@@ -212,6 +247,57 @@ describe('user preferences persistence', () => {
       JSON.parse(values.get(preferencesStorageKey(userId))!).state
         .beforeStartDismissed
     ).toBe(false);
+  });
+
+  it('serializes concurrent dismissals so a later success wins after the first rollback', async () => {
+    const userId = 'concurrent-dismissals';
+    const memory = createRejectableFirstWriteStorage();
+    const store = createUserPreferencesStore(userId, memory.storage);
+
+    const firstDismissal = store.getState().dismissBeforeStart();
+    const firstResult = firstDismissal.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await memory.firstWriteStarted;
+    const secondDismissal = store.getState().dismissBeforeStart();
+
+    memory.rejectFirstWrite(new Error('storage unavailable'));
+
+    await expect(firstResult).resolves.toEqual(new Error('storage unavailable'));
+    await expect(secondDismissal).resolves.toBeUndefined();
+    expect(store.getState().beforeStartDismissed).toBe(true);
+    expect(
+      memory.writes.map(({ value }) => JSON.parse(value).state.beforeStartDismissed)
+    ).toEqual([true, false, true]);
+    expect(readPersisted(memory, userId).state.beforeStartDismissed).toBe(true);
+  });
+
+  it('preserves a concurrent unrelated preference write when dismissal rolls back', async () => {
+    const userId = 'dismissal-with-sound-write';
+    const memory = createRejectableFirstWriteStorage();
+    const store = createUserPreferencesStore(userId, memory.storage);
+
+    const dismissal = store.getState().dismissBeforeStart();
+    const dismissalResult = dismissal.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await memory.firstWriteStarted;
+    const soundWrite = store.getState().setSoundEnabled(false);
+
+    memory.rejectFirstWrite(new Error('storage unavailable'));
+
+    await expect(dismissalResult).resolves.toEqual(new Error('storage unavailable'));
+    await expect(soundWrite).resolves.toBeUndefined();
+    expect(store.getState()).toMatchObject({
+      beforeStartDismissed: false,
+      soundEnabled: false
+    });
+    expect(readPersisted(memory, userId).state).toMatchObject({
+      beforeStartDismissed: false,
+      soundEnabled: false
+    });
   });
 
   it('rejects a custom duration override before changing state or writing', async () => {
