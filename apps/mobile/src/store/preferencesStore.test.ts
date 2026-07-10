@@ -181,6 +181,39 @@ describe('user preferences persistence', () => {
     expect(memory.writes).toHaveLength(6);
   });
 
+  it('rolls back before-start dismissal when persistence fails', async () => {
+    const values = new Map<string, string>();
+    let writeAttempts = 0;
+    const storage: StateStorage = {
+      async getItem(name) {
+        return values.get(name) ?? null;
+      },
+      async setItem(name, value) {
+        writeAttempts += 1;
+        if (writeAttempts === 1) {
+          throw new Error('storage unavailable');
+        }
+        values.set(name, value);
+      },
+      async removeItem(name) {
+        values.delete(name);
+      }
+    };
+    const userId = 'dismiss-rollback';
+    const store = createUserPreferencesStore(userId, storage);
+
+    await expect(store.getState().dismissBeforeStart()).rejects.toThrow(
+      'storage unavailable'
+    );
+
+    expect(store.getState().beforeStartDismissed).toBe(false);
+    expect(writeAttempts).toBe(2);
+    expect(
+      JSON.parse(values.get(preferencesStorageKey(userId))!).state
+        .beforeStartDismissed
+    ).toBe(false);
+  });
+
   it('rejects a custom duration override before changing state or writing', async () => {
     const memory = createMemoryStorage();
     const store = createUserPreferencesStore('invalid-override', memory.storage);

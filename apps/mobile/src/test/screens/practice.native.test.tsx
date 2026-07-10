@@ -2,7 +2,7 @@ import React from 'react';
 import { jest } from '@jest/globals';
 import type { BreathingMethod } from '@easy-meditation/shared';
 import { BREATHING_METHODS_SEED } from '@easy-meditation/shared';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import type { StateStorage } from 'zustand/middleware';
 
 const mockRouter = {
@@ -126,6 +126,26 @@ function createMemoryStorage(): StateStorage {
       return values.get(name) ?? null;
     },
     async setItem(name, value) {
+      values.set(name, value);
+    },
+    async removeItem(name) {
+      values.delete(name);
+    }
+  };
+}
+
+function createRejectOnceStorage(): StateStorage {
+  const values = new Map<string, string>();
+  let shouldReject = true;
+  return {
+    async getItem(name) {
+      return values.get(name) ?? null;
+    },
+    async setItem(name, value) {
+      if (shouldReject) {
+        shouldReject = false;
+        throw new Error('storage unavailable');
+      }
       values.set(name, value);
     },
     async removeItem(name) {
@@ -264,6 +284,26 @@ describe('PracticeScreen', () => {
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
+  it('rolls back a failed dismissal, shows retry feedback, and succeeds on retry', async () => {
+    const store = createUserPreferencesStore(
+      'practice-dismiss-retry',
+      createRejectOnceStorage()
+    );
+    await hydrateUserPreferencesStore(store);
+    const view = await renderPractice({ methods: BREATHING_METHODS_SEED, store });
+    await waitFor(() => expect(view.getByText('在您开始前')).toBeTruthy());
+
+    fireEvent.press(view.getByRole('button', { name: '关闭开始前提示' }));
+
+    await waitFor(() => expect(view.getByText('关闭失败，请重试。')).toBeTruthy());
+    expect(store.getState().beforeStartDismissed).toBe(false);
+    expect(view.getByText('在您开始前')).toBeTruthy();
+
+    fireEvent.press(view.getByRole('button', { name: '重试关闭开始前提示' }));
+    await waitFor(() => expect(store.getState().beforeStartDismissed).toBe(true));
+    expect(view.queryByText('在您开始前')).toBeNull();
+  });
+
   it('shows a centered retry after an initial total failure and recovers', async () => {
     fetchMethodsMock
       .mockRejectedValueOnce(new Error('offline'))
@@ -289,6 +329,35 @@ describe('PracticeScreen', () => {
     for (const id of ['box', 'four-seven-eight', 'coherent', 'custom']) {
       expect(view.getByTestId(`mode-card-${id}`)).toBeTruthy();
     }
+  });
+
+  it('clears an active duration editor when refresh removes that fixed method', async () => {
+    const view = await renderPractice({ methods: BREATHING_METHODS_SEED });
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: '更改盒式呼吸法训练时长' })).toBeTruthy()
+    );
+    fireEvent.press(view.getByRole('button', { name: '更改盒式呼吸法训练时长' }));
+    expect(view.getByTestId('practice-duration-backdrop')).toBeTruthy();
+
+    fetchMethodsMock.mockResolvedValueOnce(
+      BREATHING_METHODS_SEED.filter((method) => method.id !== 'box')
+    );
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: publicQueryKeys.methods });
+    });
+
+    await waitFor(() =>
+      expect(view.getByTestId('mode-card-box').props.accessibilityState).toMatchObject({
+        disabled: true
+      })
+    );
+    expect(view.queryByTestId('practice-duration-backdrop')).toBeNull();
+    expect(view.queryByLabelText('输入盒式呼吸法训练分钟数')).toBeNull();
+
+    fireEvent.press(
+      view.getAllByRole('button', { name: '了解呼吸训练和冥想' })[0]!
+    );
+    expect(mockRouter.push).toHaveBeenCalledWith('/guide');
   });
 
   it('keeps a missing fixed method disabled and exposes a retryable quiet warning', async () => {

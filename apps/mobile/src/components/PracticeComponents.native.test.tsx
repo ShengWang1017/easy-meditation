@@ -122,6 +122,30 @@ function renderModeCard(model: ModeCardViewModel) {
 }
 
 describe('DurationPopover', () => {
+  it('uses a 44-point minimum target for the duration input container', () => {
+    const view = render(
+      <DurationPopover
+        methodTitle="盒式呼吸法"
+        onChange={jest.fn(async () => undefined)}
+        onRequestClose={jest.fn()}
+        value={3}
+      />
+    );
+    const input = view.getByLabelText('输入盒式呼吸法训练分钟数');
+    let inputWrap = input.parent;
+    while (
+      inputWrap &&
+      StyleSheet.flatten(inputWrap.props.style).minHeight === undefined
+    ) {
+      inputWrap = inputWrap.parent;
+    }
+
+    expect(inputWrap).not.toBeNull();
+    expect(StyleSheet.flatten(inputWrap!.props.style).minHeight).toBe(
+      layout.touchTarget
+    );
+  });
+
   it.each([
     ['0', 1],
     ['61', 60],
@@ -163,6 +187,34 @@ describe('DurationPopover', () => {
 
     expect(onRequestClose).toHaveBeenCalledTimes(1);
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('stays open with retry feedback when persistence rejects', async () => {
+    const onChange = jest
+      .fn(async () => undefined)
+      .mockRejectedValueOnce(new Error('storage unavailable'));
+    const onRequestClose = jest.fn();
+    const view = render(
+      <DurationPopover
+        methodTitle="盒式呼吸法"
+        onChange={onChange}
+        onRequestClose={onRequestClose}
+        value={3}
+      />
+    );
+
+    fireEvent.changeText(view.getByLabelText('输入盒式呼吸法训练分钟数'), '8');
+    fireEvent.press(view.getByRole('button', { name: '确认盒式呼吸法训练时长' }));
+
+    await waitFor(() => expect(view.getByText('保存失败，请重试。')).toBeTruthy());
+    expect(view.getByLabelText('输入盒式呼吸法训练分钟数')).toBeTruthy();
+    expect(onRequestClose).not.toHaveBeenCalled();
+
+    fireEvent.press(
+      view.getByRole('button', { name: '重试保存盒式呼吸法训练时长' })
+    );
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2));
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -289,6 +341,24 @@ describe('BeforeStartCard', () => {
 
     fireEvent.press(view.getByRole('button', { name: '了解呼吸训练和冥想' }));
     expect(onOpenGuide).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the card visible with a retry when dismissal persistence rejects', async () => {
+    const onDismiss = jest
+      .fn(async () => undefined)
+      .mockRejectedValueOnce(new Error('storage unavailable'));
+    const view = render(
+      <BeforeStartCard onDismiss={onDismiss} onOpenGuide={jest.fn()} />
+    );
+
+    fireEvent.press(view.getByRole('button', { name: '关闭开始前提示' }));
+
+    await waitFor(() => expect(view.getByText('关闭失败，请重试。')).toBeTruthy());
+    expect(view.getByTestId('before-start-card-shell')).toBeTruthy();
+
+    fireEvent.press(view.getByRole('button', { name: '重试关闭开始前提示' }));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledTimes(2));
+    expect(view.queryByText('关闭失败，请重试。')).toBeNull();
   });
 });
 

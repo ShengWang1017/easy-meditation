@@ -236,8 +236,19 @@ export function createUserPreferencesStore(
           await barrier.flush();
         },
         async dismissBeforeStart() {
+          const previousDismissed = get().beforeStartDismissed;
           set({ beforeStartDismissed: true });
-          await barrier.flush();
+          try {
+            await barrier.flush();
+          } catch (error) {
+            set({ beforeStartDismissed: previousDismissed });
+            try {
+              await barrier.flush();
+            } catch {
+              // The failed dismissal did not replace the previously persisted value.
+            }
+            throw error;
+          }
         },
         async putLedgerEntry(entry) {
           const validEntry = cloneLedgerEntry(localSessionLedgerEntrySchema.parse(entry));

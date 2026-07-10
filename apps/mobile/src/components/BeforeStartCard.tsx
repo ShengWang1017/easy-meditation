@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import {
   Image,
   Pressable,
@@ -6,7 +8,6 @@ import {
   View,
   type GestureResponderEvent
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 import { referenceImages } from '../theme/assets';
 import { colors, layout, shadows, typography } from '../theme/tokens';
@@ -23,10 +24,24 @@ export function BeforeStartCard({
 }: BeforeStartCardProps) {
   const { width } = useWindowDimensions();
   const compact = width <= 380;
+  const [isDismissing, setIsDismissing] = useState(false);
+  const [dismissFailed, setDismissFailed] = useState(false);
 
   async function dismiss(event?: GestureResponderEvent) {
     event?.stopPropagation();
-    await onDismiss();
+    if (isDismissing) {
+      return;
+    }
+
+    setDismissFailed(false);
+    setIsDismissing(true);
+    try {
+      await onDismiss();
+    } catch {
+      setDismissFailed(true);
+    } finally {
+      setIsDismissing(false);
+    }
   }
 
   return (
@@ -46,8 +61,12 @@ export function BeforeStartCard({
         testID="before-start-card"
       />
       <Pressable
-        accessibilityLabel="关闭开始前提示"
+        accessibilityLabel={
+          dismissFailed ? '重试关闭开始前提示' : '关闭开始前提示'
+        }
         accessibilityRole="button"
+        accessibilityState={{ busy: isDismissing, disabled: isDismissing }}
+        disabled={isDismissing}
         hitSlop={3}
         onPress={(event) => void dismiss(event)}
         style={styles.dismissTarget}
@@ -75,6 +94,16 @@ export function BeforeStartCard({
         >
           了解每项呼吸训练的工作原理并获取帮助您练习的提示。
         </AppText>
+        {dismissFailed ? (
+          <AppText
+            accessibilityLiveRegion="polite"
+            accessibilityRole="alert"
+            style={styles.errorText}
+            variant="meta"
+          >
+            关闭失败，请重试。
+          </AppText>
+        ) : null}
       </View>
       <Image
         accessible={false}
@@ -161,6 +190,11 @@ const styles = StyleSheet.create({
   bodyCompact: {
     fontSize: 14,
     lineHeight: 19.88
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 12,
+    lineHeight: 16
   },
   image: {
     borderRadius: 18,

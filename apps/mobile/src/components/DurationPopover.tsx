@@ -10,7 +10,7 @@ import {
   type TextInputSubmitEditingEventData
 } from 'react-native';
 
-import { colors, shadows } from '../theme/tokens';
+import { colors, layout, shadows } from '../theme/tokens';
 import { AppText } from './AppText';
 
 export type DurationPopoverProps = {
@@ -38,6 +38,7 @@ export function DurationPopover({
   const compact = width <= 380;
   const [draft, setDraft] = useState(String(normalizeDurationMinutes(value)));
   const [isSaving, setIsSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   useEffect(() => {
     setDraft(String(normalizeDurationMinutes(value)));
@@ -53,13 +54,21 @@ export function DurationPopover({
       Number.isFinite(parsed) ? parsed : value
     );
     setDraft(String(minutes));
+    setSaveFailed(false);
     setIsSaving(true);
     try {
       await onChange(minutes);
       onRequestClose();
+    } catch {
+      setSaveFailed(true);
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function changeDraft(nextDraft: string) {
+    setDraft(nextDraft);
+    setSaveFailed(false);
   }
 
   function stopAndClose(event?: GestureResponderEvent) {
@@ -107,7 +116,7 @@ export function DurationPopover({
             inputMode="decimal"
             keyboardType="decimal-pad"
             maxLength={5}
-            onChangeText={setDraft}
+            onChangeText={changeDraft}
             onPressIn={(event) => event.stopPropagation()}
             onSubmitEditing={submit}
             returnKeyType="done"
@@ -119,8 +128,22 @@ export function DurationPopover({
             分钟
           </AppText>
         </View>
+        {saveFailed ? (
+          <AppText
+            accessibilityLiveRegion="polite"
+            accessibilityRole="alert"
+            style={styles.errorText}
+            variant="meta"
+          >
+            保存失败，请重试。
+          </AppText>
+        ) : null}
         <Pressable
-          accessibilityLabel={`确认${methodTitle}训练时长`}
+          accessibilityLabel={
+            saveFailed
+              ? `重试保存${methodTitle}训练时长`
+              : `确认${methodTitle}训练时长`
+          }
           accessibilityRole="button"
           accessibilityState={{ busy: isSaving, disabled: isSaving }}
           disabled={isSaving}
@@ -131,7 +154,7 @@ export function DurationPopover({
           ]}
         >
           <AppText style={styles.confirmText} variant="meta">
-            确认
+            {saveFailed ? '重试' : '确认'}
           </AppText>
         </Pressable>
       </View>
@@ -175,7 +198,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 4,
     justifyContent: 'center',
-    minHeight: 36,
+    minHeight: layout.touchTarget,
     paddingHorizontal: 9
   },
   input: {
@@ -198,6 +221,12 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     justifyContent: 'center',
     minHeight: 44
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center'
   },
   confirmPressed: {
     backgroundColor: 'rgba(168, 232, 224, 0.48)'

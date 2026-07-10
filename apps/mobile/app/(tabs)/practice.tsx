@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import {
@@ -63,6 +63,23 @@ export default function PracticeScreen() {
   });
   const [activeDurationId, setActiveDurationId] =
     useState<BuiltInMethodId | null>(null);
+  const [dismissPending, setDismissPending] = useState(false);
+  const activeDurationAvailable =
+    activeDurationId !== null &&
+    methodsQuery.data?.some((method) => method.id === activeDurationId) === true;
+  const visibleActiveDurationId = activeDurationAvailable
+    ? activeDurationId
+    : null;
+
+  useEffect(() => {
+    if (
+      activeDurationId !== null &&
+      methodsQuery.data &&
+      !methodsQuery.data.some((method) => method.id === activeDurationId)
+    ) {
+      setActiveDurationId(null);
+    }
+  }, [activeDurationId, methodsQuery.data]);
 
   if (methodsQuery.isLoading && !methodsQuery.data) {
     return (
@@ -121,7 +138,7 @@ export default function PracticeScreen() {
       ...slot,
       backgroundColor: SLOT_COLORS[slot.id],
       durationMinutes,
-      durationPopoverOpen: slot.id === activeDurationId
+      durationPopoverOpen: slot.id === visibleActiveDurationId
     };
   });
 
@@ -130,7 +147,7 @@ export default function PracticeScreen() {
   }
 
   function openGuide() {
-    if (activeDurationId) {
+    if (visibleActiveDurationId) {
       closeDuration();
       return;
     }
@@ -138,7 +155,7 @@ export default function PracticeScreen() {
   }
 
   function openCustomEditor() {
-    if (activeDurationId) {
+    if (visibleActiveDurationId) {
       closeDuration();
       return;
     }
@@ -146,7 +163,7 @@ export default function PracticeScreen() {
   }
 
   function startBuiltIn(viewModel: ModeCardViewModel) {
-    if (activeDurationId) {
+    if (visibleActiveDurationId) {
       closeDuration();
       return;
     }
@@ -191,15 +208,21 @@ export default function PracticeScreen() {
   }
 
   async function dismissBeforeCard() {
-    if (activeDurationId) {
+    if (visibleActiveDurationId) {
       closeDuration();
       return;
     }
-    await dismissBeforeStart();
+    setDismissPending(true);
+    await Promise.resolve();
+    try {
+      await dismissBeforeStart();
+    } finally {
+      setDismissPending(false);
+    }
   }
 
   function retryMethods() {
-    if (activeDurationId) {
+    if (visibleActiveDurationId) {
       closeDuration();
       return;
     }
@@ -213,7 +236,7 @@ export default function PracticeScreen() {
       scrollable
       testID="practice-screen"
     >
-      {activeDurationId ? (
+      {visibleActiveDurationId ? (
         <Pressable
           accessibilityLabel="关闭训练时长设置"
           accessibilityRole="button"
@@ -227,7 +250,7 @@ export default function PracticeScreen() {
         <PrototypeIconButton
           accessibilityLabel="返回呼吸训练首页"
           imageStyle={styles.headerIcon}
-          onPress={activeDurationId ? closeDuration : () => router.back()}
+          onPress={visibleActiveDurationId ? closeDuration : () => router.back()}
           source={referenceImages.back}
           style={styles.headerButton}
         />
@@ -278,7 +301,7 @@ export default function PracticeScreen() {
         style={[
           styles.grid,
           { gap: compact ? layout.compactGridGap : layout.gridGap },
-          activeDurationId ? styles.gridWithPopover : null
+          visibleActiveDurationId ? styles.gridWithPopover : null
         ]}
         testID="practice-mode-grid"
       >
@@ -305,7 +328,7 @@ export default function PracticeScreen() {
         ))}
       </View>
 
-      {!beforeStartDismissed ? (
+      {!beforeStartDismissed || dismissPending ? (
         <View style={styles.beforeWrap}>
           <BeforeStartCard
             onDismiss={dismissBeforeCard}
