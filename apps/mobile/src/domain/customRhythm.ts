@@ -10,13 +10,13 @@ export type CustomRhythm = {
   durationMinutes: CustomDurationMinutes;
 };
 
-export const DEFAULT_CUSTOM_RHYTHM: CustomRhythm = {
+export const DEFAULT_CUSTOM_RHYTHM: Readonly<CustomRhythm> = Object.freeze({
   name: '自定义',
   inhaleSeconds: 4,
   holdSeconds: 2,
   exhaleSeconds: 5,
   durationMinutes: 5
-};
+});
 
 const CUSTOM_PHASE_KEYS = ['inhaleSeconds', 'holdSeconds', 'exhaleSeconds'] as const;
 

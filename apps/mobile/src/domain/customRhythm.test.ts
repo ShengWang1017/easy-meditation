@@ -17,6 +17,14 @@ describe('custom rhythm', () => {
     });
   });
 
+  test('exposes an immutable default rhythm', () => {
+    const originalInhaleSeconds = DEFAULT_CUSTOM_RHYTHM.inhaleSeconds;
+
+    expect(Object.isFrozen(DEFAULT_CUSTOM_RHYTHM)).toBe(true);
+    expect(Reflect.set(DEFAULT_CUSTOM_RHYTHM, 'inhaleSeconds', 12)).toBe(false);
+    expect(DEFAULT_CUSTOM_RHYTHM.inhaleSeconds).toBe(originalInhaleSeconds);
+  });
+
   test('converts the current rhythm to a complete breathing method', () => {
     const rhythm: CustomRhythm = {
       name: '自定义',
@@ -49,6 +57,56 @@ describe('custom rhythm', () => {
     [36, { inhaleSeconds: 12, holdSeconds: 12, exhaleSeconds: 12 }]
   ] as const)('redistributes the default cycle to %i seconds', (targetSeconds, expected) => {
     expect(redistributeCycleSeconds(DEFAULT_CUSTOM_RHYTHM, targetSeconds)).toEqual(expected);
+  });
+
+  test('removes a negative remainder from the first tied phase', () => {
+    expect(
+      redistributeCycleSeconds(
+        { inhaleSeconds: 1, holdSeconds: 1, exhaleSeconds: 1 },
+        5
+      )
+    ).toEqual({ inhaleSeconds: 1, holdSeconds: 2, exhaleSeconds: 2 });
+  });
+
+  test('adds a positive remainder to the first tied phase', () => {
+    expect(
+      redistributeCycleSeconds(
+        { inhaleSeconds: 1, holdSeconds: 1, exhaleSeconds: 1 },
+        4
+      )
+    ).toEqual({ inhaleSeconds: 2, holdSeconds: 1, exhaleSeconds: 1 });
+  });
+
+  test('normalizes skewed finite phase values before redistribution', () => {
+    expect(
+      redistributeCycleSeconds(
+        { inhaleSeconds: 0, holdSeconds: 2.6, exhaleSeconds: 99 },
+        10
+      )
+    ).toEqual({ inhaleSeconds: 1, holdSeconds: 2, exhaleSeconds: 7 });
+  });
+
+  test('preserves integer bounds and the requested total across a representative grid', () => {
+    const rhythms = Array.from({ length: 12 }, (_, index) => ({
+      inhaleSeconds: index + 1,
+      holdSeconds: 12 - index,
+      exhaleSeconds: ((index * 5) % 12) + 1
+    }));
+
+    for (const rhythm of rhythms) {
+      for (let targetSeconds = 3; targetSeconds <= 36; targetSeconds += 1) {
+        const redistributed = redistributeCycleSeconds(rhythm, targetSeconds);
+        const phases = [
+          redistributed.inhaleSeconds,
+          redistributed.holdSeconds,
+          redistributed.exhaleSeconds
+        ];
+
+        expect(phases.every(Number.isInteger)).toBe(true);
+        expect(phases.every((value) => value >= 1 && value <= 12)).toBe(true);
+        expect(phases.reduce((sum, value) => sum + value, 0)).toBe(targetSeconds);
+      }
+    }
   });
 
   test('clamps target seconds to the supported cycle range', () => {
