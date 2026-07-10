@@ -1,7 +1,8 @@
 # Mobile Visual And Performance QA
 
 Status: **host foundation and deterministic Web/native fixture runtimes wired;
-visual and performance acceptance not run**.
+authorized Web reference capture complete; native visual and performance
+acceptance not run**.
 
 This document describes the deterministic tooling currently present in the
 repository and the work still required before any screenshot or frame-rate
@@ -67,6 +68,10 @@ result can be called acceptance evidence.
   READY.
 - Android framestats/JSON duration analysis and fixed-schema iOS Core Animation
   XML extraction have deterministic Node tests and nonzero gate exit codes.
+- `docs/visual-qa/reference-web/` contains the authorized DPR-1 Chrome
+  reference set for all 11 approved Web states at `390x844` and `412x915`,
+  including `VISUAL_QA_READY` metrics and the historical practice comparison.
+  Login and registration remain native-only.
 
 Run the completed host checks with:
 
@@ -115,19 +120,19 @@ font family class, weight, declared size and line height, line count, and text
 block bounds. Primary element bounds allow at most four logical pixels;
 declared type size and line height allow at most two.
 
-`docs/visual-qa/accepted/` currently contains only `.gitkeep`. No screenshots,
-overlays, diffs, traces, logs, or performance numbers have been captured or
-accepted. Do not add fabricated or simulator-only data as passing evidence.
+`docs/visual-qa/accepted/` still contains only `.gitkeep`: no native pair,
+overlay, pixel diff, trace, or performance result has been accepted.
+`docs/visual-qa/reference-web/` is source-side evidence only. Do not treat it
+as proof of native fidelity or add fabricated/simulator-only data as passing
+device evidence.
 
 ## Deliberately Not Run
 
-This foundation pass did **not**:
+The completed Web reference pass still did **not**:
 
-- download a Playwright browser or launch/control any browser;
-- start a Web server or capture a Web reference;
 - boot a simulator/emulator, install an app, open a deep link, or take a
-  screenshot;
-- generate or accept a visual overlay or pixel diff;
+  native screenshot;
+- generate or accept a Web-to-native visual overlay or pixel diff;
 - invoke `adb`, `xcrun`, `simctl`, or `xctrace`;
 - clear or collect device logs;
 - generate iOS/Android native projects or run release builds;
@@ -140,23 +145,19 @@ also require all explicit selectors and paths before they can execute.
 
 ## Remaining Blockers And Required Follow-up
 
-1. Obtain explicit user authorization for deterministic browser capture. The
-   repository has `@playwright/test` as a host dependency, but no browser was
-   installed in this pass. A clean ephemeral browser exception is preferable
-   to exposing a signed-in personal profile.
-2. Install and select full Xcode with an iPhone 14 runtime, `simctl`,
+1. Install and select full Xcode with an iPhone 14 runtime, `simctl`,
    `xctrace`, and CocoaPods. Validate the installed Xcode's exported Core
    Animation TOC schema against the pinned parser before using it.
-3. Use JDK 17 and install the matching Android platform/build tools and NDK.
+2. Use JDK 17 and install the matching Android platform/build tools and NDK.
    Create an API 34 Pixel 7 target with GPU acceleration for visual checks.
-4. Always pass an explicit Android serial or iOS UDID. Keep timestamped,
+3. Always pass an explicit Android serial or iOS UDID. Keep timestamped,
    filtered logs; never erase shared or physical-device logs.
-5. Treat simulator frame data as diagnostic only. Final 60-second release-mode
+4. Treat simulator frame data as diagnostic only. Final 60-second release-mode
    performance, lifecycle, audio, and offline evidence requires physical Pixel
    7 and iPhone 14 hardware after a 10-second warmup.
-6. Login and registration have no Web reference. Validate them against the
+5. Login and registration have no Web reference. Validate them against the
    approved native tokens/components instead of manufacturing Web overlays.
-7. Decide on a controlled QA release profile for performance fixtures. A
+6. Decide on a controlled QA release profile for performance fixtures. A
    `__DEV__`-only fixture correctly protects production, but cannot drive a
    release performance run.
 

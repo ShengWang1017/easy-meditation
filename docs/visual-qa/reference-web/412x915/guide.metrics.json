@@ -1,0 +1,81 @@
+{
+  "marker": "VISUAL_QA_READY",
+  "state": "guide",
+  "pixelRatio": 1,
+  "safeArea": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "elements": {
+    "guide-header": {
+      "x": 24,
+      "y": 32,
+      "width": 364,
+      "height": 52
+    },
+    "guide-copy": {
+      "x": 24,
+      "y": 84,
+      "width": 364,
+      "height": 819
+    },
+    "guide-panel": {
+      "x": 24,
+      "y": 246.546875,
+      "width": 364,
+      "height": 152.765625
+    },
+    "guide-list": {
+      "x": 24,
+      "y": 415.3125,
+      "width": 364,
+      "height": 536.4375
+    },
+    "guide-title": {
+      "x": 142,
+      "y": 42,
+      "width": 128,
+      "height": 32,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "800",
+      "fontSize": 32,
+      "lineHeight": 32,
+      "lines": 1
+    },
+    "guide-kicker": {
+      "x": 24,
+      "y": 122,
+      "width": 364,
+      "height": 21.59375,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "400",
+      "fontSize": 18,
+      "lineHeight": 21.6,
+      "lines": 1
+    },
+    "guide-heading": {
+      "x": 24,
+      "y": 159.59375,
+      "width": 364,
+      "height": 66.953125,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "800",
+      "fontSize": 27,
+      "lineHeight": 33.48,
+      "lines": 2
+    },
+    "guide-panel-body": {
+      "x": 46,
+      "y": 303.84375,
+      "width": 320,
+      "height": 75.46875,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "500",
+      "fontSize": 17,
+      "lineHeight": 25.16,
+      "lines": 3
+    }
+  }
+}

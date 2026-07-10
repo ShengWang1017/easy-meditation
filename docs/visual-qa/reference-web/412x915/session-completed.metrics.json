@@ -1,0 +1,59 @@
+{
+  "marker": "VISUAL_QA_READY",
+  "state": "session-completed",
+  "pixelRatio": 1,
+  "safeArea": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "elements": {
+    "focus-running-view": {
+      "x": 24,
+      "y": 24,
+      "width": 376,
+      "height": 915
+    },
+    "focus-phase-readout": {
+      "x": 178,
+      "y": 132,
+      "width": 68,
+      "height": 82
+    },
+    "breath-stage": {
+      "x": 42,
+      "y": 214,
+      "width": 340,
+      "height": 518
+    },
+    "focus-actions": {
+      "x": 62,
+      "y": 809,
+      "width": 300,
+      "height": 106
+    },
+    "focus-phase-copy": {
+      "x": 178,
+      "y": 156,
+      "width": 68,
+      "height": 34,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "560",
+      "fontSize": 34,
+      "lineHeight": 34,
+      "lines": 1
+    },
+    "focus-timer": {
+      "x": 180,
+      "y": 734,
+      "width": 64,
+      "height": 32,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "620",
+      "fontSize": 32,
+      "lineHeight": 32,
+      "lines": 1
+    }
+  }
+}

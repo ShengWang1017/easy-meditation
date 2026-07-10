@@ -1,0 +1,65 @@
+{
+  "marker": "VISUAL_QA_READY",
+  "state": "records-populated",
+  "pixelRatio": 1,
+  "safeArea": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "elements": {
+    "records-view": {
+      "x": 24,
+      "y": 58,
+      "width": 342,
+      "height": 700
+    },
+    "records-stats": {
+      "x": 24,
+      "y": 160,
+      "width": 342,
+      "height": 68
+    },
+    "records-heatmap": {
+      "x": 24,
+      "y": 239,
+      "width": 342,
+      "height": 282.71875
+    },
+    "records-list": {
+      "x": 24,
+      "y": 532.71875,
+      "width": 342,
+      "height": 124
+    },
+    "bottom-nav": {
+      "x": 24,
+      "y": 774,
+      "width": 342,
+      "height": 58
+    },
+    "records-title": {
+      "x": 41,
+      "y": 107,
+      "width": 150,
+      "height": 28,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "800",
+      "fontSize": 25,
+      "lineHeight": 28,
+      "lines": 1
+    },
+    "records-total": {
+      "x": 275.4609375,
+      "y": 86,
+      "width": 62.5390625,
+      "height": 23,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "780",
+      "fontSize": 23,
+      "lineHeight": 23,
+      "lines": 1
+    }
+  }
+}

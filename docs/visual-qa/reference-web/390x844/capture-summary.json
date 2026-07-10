@@ -1,0 +1,169 @@
+[
+  {
+    "state": "practice",
+    "screenshotPath": "./01-practice.png",
+    "metricsPath": "./practice.metrics.json",
+    "measurement": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "dpr": 1,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "headings": [
+        "呼吸训练",
+        "选择要进行的呼吸训练。"
+      ]
+    },
+    "elementCount": 7
+  },
+  {
+    "state": "guide",
+    "screenshotPath": "./02-guide.png",
+    "metricsPath": "./guide.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [
+        "练习指南",
+        "呼吸训练让注意力有一个温柔的落点。",
+        "它为什么有用"
+      ],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390
+    },
+    "elementCount": 8
+  },
+  {
+    "state": "custom",
+    "screenshotPath": "./03-custom.png",
+    "metricsPath": "./custom.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [
+        "设置呼吸方式"
+      ],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 406
+    },
+    "elementCount": 9
+  },
+  {
+    "state": "session-ready",
+    "screenshotPath": "./04-session-ready.png",
+    "metricsPath": "./session-ready.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 419
+    },
+    "elementCount": 5
+  },
+  {
+    "state": "session-inhale",
+    "screenshotPath": "./05-session-inhale.png",
+    "metricsPath": "./session-inhale.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 419
+    },
+    "elementCount": 6
+  },
+  {
+    "state": "session-hold",
+    "screenshotPath": "./06-session-hold.png",
+    "metricsPath": "./session-hold.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 419
+    },
+    "elementCount": 6
+  },
+  {
+    "state": "session-exhale",
+    "screenshotPath": "./07-session-exhale.png",
+    "metricsPath": "./session-exhale.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 419
+    },
+    "elementCount": 6
+  },
+  {
+    "state": "session-paused",
+    "screenshotPath": "./08-session-paused.png",
+    "metricsPath": "./session-paused.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 419
+    },
+    "elementCount": 6
+  },
+  {
+    "state": "session-completed",
+    "screenshotPath": "./09-session-completed.png",
+    "metricsPath": "./session-completed.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 419
+    },
+    "elementCount": 6
+  },
+  {
+    "state": "records-empty",
+    "screenshotPath": "./10-records-empty.png",
+    "metricsPath": "./records-empty.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [
+        "轻轻记住坚持"
+      ],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390
+    },
+    "elementCount": 7
+  },
+  {
+    "state": "records-populated",
+    "screenshotPath": "./11-records-populated.png",
+    "metricsPath": "./records-populated.metrics.json",
+    "measurement": {
+      "dpr": 1,
+      "headings": [
+        "轻轻记住坚持"
+      ],
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390
+    },
+    "elementCount": 7
+  }
+]

@@ -1,0 +1,82 @@
+{
+  "marker": "VISUAL_QA_READY",
+  "state": "custom",
+  "pixelRatio": 1,
+  "safeArea": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "elements": {
+    "custom-settings-header": {
+      "x": 48,
+      "y": 56,
+      "width": 316,
+      "height": 56
+    },
+    "custom-panel": {
+      "x": 48,
+      "y": 204,
+      "width": 316,
+      "height": 487
+    },
+    "custom-cycle-row": {
+      "x": 76,
+      "y": 236,
+      "width": 260,
+      "height": 42
+    },
+    "custom-wheel-grid": {
+      "x": 94,
+      "y": 344,
+      "width": 224,
+      "height": 203
+    },
+    "custom-target-row": {
+      "x": 76,
+      "y": 596,
+      "width": 260,
+      "height": 70
+    },
+    "custom-start": {
+      "x": 48,
+      "y": 707,
+      "width": 316,
+      "height": 54
+    },
+    "custom-title": {
+      "x": 116,
+      "y": 65.640625,
+      "width": 204,
+      "height": 36.71875,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "800",
+      "fontSize": 34,
+      "lineHeight": 36.72,
+      "lines": 1
+    },
+    "custom-cycle-label": {
+      "x": 76,
+      "y": 242.84375,
+      "width": 168,
+      "height": 28.3125,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "800",
+      "fontSize": 24,
+      "lineHeight": 28.32,
+      "lines": 1
+    },
+    "custom-target-label": {
+      "x": 76,
+      "y": 639.6015625,
+      "width": 144,
+      "height": 26.3984375,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "600",
+      "fontSize": 24,
+      "lineHeight": 26.4,
+      "lines": 1
+    }
+  }
+}

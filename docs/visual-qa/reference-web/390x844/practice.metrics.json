@@ -1,0 +1,65 @@
+{
+  "marker": "VISUAL_QA_READY",
+  "state": "practice",
+  "pixelRatio": 1,
+  "safeArea": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "elements": {
+    "training-header": {
+      "x": 24,
+      "y": 32,
+      "width": 342,
+      "height": 52
+    },
+    "training-intro": {
+      "x": 24,
+      "y": 130,
+      "width": 342,
+      "height": 33.2734375
+    },
+    "mode-grid": {
+      "x": 24,
+      "y": 185.2734375,
+      "width": 342,
+      "height": 371
+    },
+    "before-card": {
+      "x": 34,
+      "y": 580.2734375,
+      "width": 322,
+      "height": 113
+    },
+    "bottom-nav": {
+      "x": 110,
+      "y": 773,
+      "width": 170,
+      "height": 42
+    },
+    "training-title": {
+      "x": 131,
+      "y": 42,
+      "width": 128,
+      "height": 32,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "800",
+      "fontSize": 32,
+      "lineHeight": 32,
+      "lines": 1
+    },
+    "training-intro-copy": {
+      "x": 24,
+      "y": 130,
+      "width": 342,
+      "height": 33.2734375,
+      "fontFamily": "KaiTi, STKaiti, \"Kaiti SC\", \"Comic Sans MS\", cursive",
+      "fontWeight": "800",
+      "fontSize": 26,
+      "lineHeight": 33.28,
+      "lines": 1
+    }
+  }
+}
