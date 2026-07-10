@@ -25,9 +25,9 @@ const rhythmSnapshot: BreathingPhase[] = [
 const input: PracticeSessionCreateInput = {
   clientSessionId: '11111111-1111-4111-8111-111111111111',
   methodType: 'built_in',
-  methodId: 'box-breathing',
+  methodId: 'box',
   customRhythmId: null,
-  methodTitleSnapshot: '方格呼吸',
+  methodTitleSnapshot: '盒式呼吸法',
   rhythmSnapshot,
   plannedDurationSeconds: 300,
   actualDurationSeconds: 300,
@@ -43,9 +43,9 @@ const session: PracticeSession = {
 };
 
 const method: BreathingMethod = {
-  id: 'box-breathing',
-  slug: 'box-breathing',
-  title: '方格呼吸',
+  id: 'box',
+  slug: 'box',
+  title: '盒式呼吸',
   subtitle: '平稳的四拍节奏',
   category: 'classic',
   defaultDurationSeconds: 300,
@@ -70,7 +70,7 @@ describe('createPracticeSession', () => {
     });
   });
 
-  it('builds the completed session payload from method snapshots and timing', () => {
+  it('saves the mapped display title with the completed session snapshots', () => {
     expect(
       buildCompletedPracticeSessionInput({
         clientSessionId: input.clientSessionId,
@@ -84,7 +84,7 @@ describe('createPracticeSession', () => {
       methodType: 'built_in',
       methodId: method.id,
       customRhythmId: null,
-      methodTitleSnapshot: method.title,
+      methodTitleSnapshot: '盒式呼吸法',
       rhythmSnapshot: method.phases,
       plannedDurationSeconds: method.defaultDurationSeconds,
       actualDurationSeconds: 298,
@@ -92,5 +92,24 @@ describe('createPracticeSession', () => {
       startedAt: input.startedAt,
       endedAt: input.endedAt
     });
+  });
+
+  it('retains the API title for an unknown method identifier', () => {
+    const unknownMethod: BreathingMethod = {
+      ...method,
+      id: 'future-method',
+      slug: 'future-method',
+      title: '未来呼吸'
+    };
+
+    expect(
+      buildCompletedPracticeSessionInput({
+        clientSessionId: input.clientSessionId,
+        method: unknownMethod,
+        startedAt: input.startedAt,
+        endedAt: input.endedAt,
+        actualDurationSeconds: 298
+      }).methodTitleSnapshot
+    ).toBe(unknownMethod.title);
   });
 });

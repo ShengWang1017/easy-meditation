@@ -3,6 +3,7 @@ import type {
   PracticeSession,
   PracticeSessionCreateInput
 } from '@easy-meditation/shared';
+import { getMethodDisplayTitle } from '../domain/methodPresentation';
 import { apiRequest } from './client';
 
 type BuildCompletedPracticeSessionInputOptions = {
@@ -25,7 +26,7 @@ export function buildCompletedPracticeSessionInput({
     methodType: 'built_in',
     methodId: method.id,
     customRhythmId: null,
-    methodTitleSnapshot: method.title,
+    methodTitleSnapshot: getMethodDisplayTitle(method.id) ?? method.title,
     rhythmSnapshot: method.phases,
     plannedDurationSeconds: method.defaultDurationSeconds,
     actualDurationSeconds,
