@@ -15,7 +15,6 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthSessionBoundary } from '../src/auth/AuthSessionBoundary';
 import { InlineState } from '../src/components/InlineState';
 import { appQueryClient } from '../src/query/client';
-import { VisualQaFixtureBoundary } from '../src/qa/VisualQaFixtureBoundary';
 import { useAuthStore } from '../src/store/authStore';
 import '../src/theme/assets';
 import { PrototypeFontBoundary } from '../src/theme/PrototypeFontBoundary';
@@ -94,15 +93,26 @@ function NormalRootNavigator() {
 }
 
 function RootNavigator() {
+  if (!__DEV__ || process.env.EXPO_PUBLIC_VISUAL_QA !== '1') {
+    return <NormalRootNavigator />;
+  }
+
+  return <VisualQaRootNavigator />;
+}
+
+function VisualQaRootNavigator() {
+  const { VisualQaFixtureBoundary } = require(
+    '../src/qa/VisualQaFixtureBoundary'
+  ) as typeof import('../src/qa/VisualQaFixtureBoundary');
   const params = useGlobalSearchParams<{ visualQaState?: string | string[] }>();
   const pathname = usePathname();
 
   return (
     <VisualQaFixtureBoundary
-      dev={__DEV__}
+      dev
       fallback={<NormalRootNavigator />}
       pathname={pathname}
-      requested={process.env.EXPO_PUBLIC_VISUAL_QA === '1'}
+      requested
       state={params.visualQaState}
     >
       {(fixture) =>

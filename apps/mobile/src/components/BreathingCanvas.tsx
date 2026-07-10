@@ -384,10 +384,40 @@ export function resolveBreathTransitionDirective(
 }
 
 export function BreathingCanvas(props: BreathingCanvasProps) {
+  return props.fixtureVisualTimeMs === undefined ? (
+    <LiveBreathingCanvas {...props} />
+  ) : (
+    <FixtureBreathingCanvas
+      {...props}
+      fixtureVisualTimeMs={props.fixtureVisualTimeMs}
+    />
+  );
+}
+
+function LiveBreathingCanvas(props: BreathingCanvasProps) {
+  const visualTime = useClock();
+  return <BreathingCanvasRenderer {...props} visualTime={visualTime} />;
+}
+
+function FixtureBreathingCanvas(
+  props: BreathingCanvasProps & { fixtureVisualTimeMs: number }
+) {
+  const visualTime = useSharedValue(props.fixtureVisualTimeMs);
+
+  useEffect(() => {
+    visualTime.value = props.fixtureVisualTimeMs;
+  }, [props.fixtureVisualTimeMs, visualTime]);
+
+  return <BreathingCanvasRenderer {...props} visualTime={visualTime} />;
+}
+
+function BreathingCanvasRenderer({
+  visualTime,
+  ...props
+}: BreathingCanvasProps & { visualTime: SharedValue<number> }) {
   const { width } = useWindowDimensions();
   const canvasSize = width <= 380 ? Math.min(width * 0.86, 340) : Math.min(width * 0.78, 342);
   const coordinateScale = canvasSize / BREATH_RENDER_SPEC.canvasSize;
-  const clock = useClock();
   const visualKind = resolveKind(props);
   const nextInput: BreathingVisualFrameInput = {
     kind: visualKind,
@@ -413,18 +443,12 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
   const phaseDurationMs = useSharedValue(initialInputRef.current.phaseDurationMs);
   const renderStatus = useSharedValue(initialInputRef.current.status);
   const reducedMotion = useSharedValue(initialInputRef.current.reducedMotion);
-  const fixtureVisualTimeMs = useSharedValue<number | null>(
-    props.fixtureVisualTimeMs ?? null
-  );
   const transitionAmount = useSharedValue(1);
   const previousMotion = useSharedValue<BreathMotion>(
     initialFrameRef.current.motion
   );
   const previousInput = useRef(initialInputRef.current);
 
-  const visualTime = useDerivedValue(
-    () => fixtureVisualTimeMs.value ?? clock.value
-  );
   const targetFrame = useDerivedValue(() =>
     resolveBreathingVisualFrame(
       {
@@ -452,7 +476,7 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
       cancelAnimation(transitionAmount);
       previousMotion.value = resolveBreathingVisualFrame(
         nextInput,
-        props.fixtureVisualTimeMs ?? clock.value
+        props.fixtureVisualTimeMs ?? visualTime.value
       ).motion;
       transitionAmount.value = 1;
     } else if (directive === 'animate') {
@@ -467,7 +491,6 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
     }
     previousInput.current = nextInput;
   }, [
-    clock,
     motion,
     previousMotion,
     props.fixtureVisualTimeMs,
@@ -476,6 +499,7 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
     props.reducedMotion,
     props.status,
     transitionAmount,
+    visualTime,
     visualKind
   ]);
 
@@ -485,12 +509,9 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
     phaseProgress.value = clamp01(props.phaseProgress);
     reducedMotion.value = props.reducedMotion;
     renderStatus.value = props.status;
-    fixtureVisualTimeMs.value = props.fixtureVisualTimeMs ?? null;
   }, [
-    fixtureVisualTimeMs,
     phaseDurationMs,
     phaseProgress,
-    props.fixtureVisualTimeMs,
     props.phaseDurationMs,
     props.phaseProgress,
     props.reducedMotion,

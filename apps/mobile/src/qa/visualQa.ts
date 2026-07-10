@@ -6,7 +6,6 @@ import {
 } from '@easy-meditation/shared';
 import { z } from 'zod';
 
-import sharedFixtureJson from '../../../../qa/fixtures/mobile-prototype.json';
 import {
   beforeStartDismissedSchema,
   customRhythmPreferencesSchema,
@@ -237,7 +236,7 @@ export function parseVisualQaFixture(input: unknown): VisualQaFixture {
 
 export function resolveVisualQaFixture(
   options: { dev: boolean; requested: boolean; state: unknown },
-  loadFixture: () => unknown = () => sharedFixtureJson
+  loadFixture: () => unknown = loadSharedVisualQaFixture
 ): ResolvedVisualQaFixture | null {
   if (!options.dev || !options.requested) return null;
   if (!isVisualQaState(options.state)) return null;
@@ -261,4 +260,8 @@ export function resolveVisualQaFixture(
       ? fixture.api.sessions.empty
       : fixture.api.sessions.populated
   };
+}
+
+function loadSharedVisualQaFixture(): unknown {
+  return require('../../../../qa/fixtures/mobile-prototype.json') as unknown;
 }

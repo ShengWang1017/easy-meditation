@@ -1,10 +1,11 @@
 import React from 'react';
 import { jest } from '@jest/globals';
-import { render } from '@testing-library/react-native';
+import { render, waitFor } from '@testing-library/react-native';
 
 const mockRegisteredScreens: Array<{ name: string; options?: Record<string, unknown> }> = [];
 let mockSearchParams: { visualQaState?: string | string[] } = {};
 let mockPathname = '/practice';
+const originalDev = __DEV__;
 const mockRestore = jest.fn(async () => undefined);
 const mockAuthState = {
   accessToken: 'access-token',
@@ -45,8 +46,15 @@ jest.mock('../../store/authStore', () => ({
 jest.mock('../../theme/PrototypeFontBoundary', () => ({
   PrototypeFontBoundary: ({ children }: { children: React.ReactNode }) => children
 }));
-jest.mock('../../qa/VisualQaFixtureBoundary', () => ({
-  VisualQaFixtureBoundary: ({
+jest.mock('../../qa/VisualQaFixtureBoundary', () => {
+  const globalWithCounter = globalThis as typeof globalThis & {
+    __mockQaBoundaryModuleLoads?: number;
+  };
+  globalWithCounter.__mockQaBoundaryModuleLoads =
+    (globalWithCounter.__mockQaBoundaryModuleLoads ?? 0) + 1;
+  return {
+    __esModule: true,
+    VisualQaFixtureBoundary: ({
     children,
     dev,
     fallback,
@@ -106,8 +114,9 @@ jest.mock('../../qa/VisualQaFixtureBoundary', () => ({
           ? 'unauthenticated'
           : 'authenticated'
     });
-  }
-}));
+    }
+  };
+});
 jest.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children
 }));
@@ -115,13 +124,27 @@ jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
 import RootLayout from '../../../app/_layout';
 
+function qaBoundaryModuleLoads(): number {
+  return (
+    global as typeof globalThis & { __mockQaBoundaryModuleLoads?: number }
+  ).__mockQaBoundaryModuleLoads ?? 0;
+}
+
 describe('root session route options', () => {
   beforeEach(() => {
+    (global as typeof globalThis & { __DEV__: boolean }).__DEV__ = true;
     mockRegisteredScreens.length = 0;
     mockRestore.mockClear();
     mockSearchParams = {};
     mockPathname = '/practice';
     delete process.env.EXPO_PUBLIC_VISUAL_QA;
+  });
+
+  afterAll(() => {
+    (global as typeof globalThis & { __DEV__: boolean }).__DEV__ = originalDev;
+    delete (
+      global as typeof globalThis & { __mockQaBoundaryModuleLoads?: number }
+    ).__mockQaBoundaryModuleLoads;
   });
 
   it('registers the focus route without a native header or swipe removal', () => {
@@ -137,26 +160,39 @@ describe('root session route options', () => {
       gestureEnabled: false,
       headerBackButtonMenuEnabled: false
     });
+    expect(qaBoundaryModuleLoads()).toBe(0);
   });
 
-  it('enters an authenticated QA stack before normal auth restore', () => {
+  it('does not load the QA module in production even when the env and query request it', () => {
+    (global as typeof globalThis & { __DEV__: boolean }).__DEV__ = false;
+    process.env.EXPO_PUBLIC_VISUAL_QA = '1';
+    mockSearchParams = { visualQaState: 'practice' };
+
+    render(<RootLayout />);
+
+    expect(qaBoundaryModuleLoads()).toBe(0);
+    expect(mockRestore).toHaveBeenCalledTimes(1);
+  });
+
+  it('enters an authenticated QA stack before normal auth restore', async () => {
     process.env.EXPO_PUBLIC_VISUAL_QA = '1';
     mockSearchParams = { visualQaState: 'practice' };
 
     const view = render(<RootLayout />);
 
-    expect(view.getByTestId('root-stack')).toBeTruthy();
+    await waitFor(() => expect(view.getByTestId('root-stack')).toBeTruthy());
+    expect(qaBoundaryModuleLoads()).toBe(1);
     expect(mockRestore).not.toHaveBeenCalled();
   });
 
-  it('renders normal auth slots for unauthenticated QA states without restore', () => {
+  it('renders normal auth slots for unauthenticated QA states without restore', async () => {
     process.env.EXPO_PUBLIC_VISUAL_QA = '1';
     mockSearchParams = { visualQaState: 'login' };
     mockPathname = '/login';
 
     const view = render(<RootLayout />);
 
-    expect(view.getByTestId('root-slot')).toBeTruthy();
+    await waitFor(() => expect(view.getByTestId('root-slot')).toBeTruthy());
     expect(mockRestore).not.toHaveBeenCalled();
   });
 

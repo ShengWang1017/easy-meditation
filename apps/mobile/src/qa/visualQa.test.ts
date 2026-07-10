@@ -1,4 +1,5 @@
 import fixtureJson from '../../../../qa/fixtures/mobile-prototype.json';
+import { readFileSync } from 'node:fs';
 
 import {
   VISUAL_QA_STATES,
@@ -39,6 +40,20 @@ const EXPECTED_ROUTES = {
 } as const;
 
 describe('visual QA fixture resolver', () => {
+  it('keeps the shared JSON behind the deferred resolver loader', () => {
+    const source = readFileSync(
+      `${process.cwd()}/src/qa/visualQa.ts`,
+      'utf8'
+    );
+
+    expect(source).not.toMatch(
+      /^import\s+.+mobile-prototype\.json['"];?$/m
+    );
+    expect(source).toMatch(
+      /function loadSharedVisualQaFixture\(\)[\s\S]*require\(['"]\.\.\/\.\.\/\.\.\/\.\.\/qa\/fixtures\/mobile-prototype\.json['"]\)/
+    );
+  });
+
   it('exports the exact 13-state contract and route mapping', () => {
     expect(VISUAL_QA_STATES).toEqual(EXPECTED_STATES);
 
