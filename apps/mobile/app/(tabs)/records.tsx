@@ -18,8 +18,8 @@ import {
   type MergedRecordSession
 } from '../../src/domain/records';
 import { userQueryKeys } from '../../src/query/keys';
-import { useOptionalVisualQaFixtureRuntime } from '../../src/qa/VisualQaFixtureBoundary';
 import { useVisualQaRegistration } from '../../src/qa/VisualQaReporter';
+import { useOptionalVisualQaFixtureRuntime } from '../../src/qa/visualQaRuntime';
 import { usePreferencesStore } from '../../src/store/PreferencesStoreProvider';
 import { colors } from '../../src/theme/tokens';
 

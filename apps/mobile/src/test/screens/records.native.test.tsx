@@ -74,9 +74,23 @@ jest.mock('../../domain/records', () => {
     }
   };
 });
-jest.mock('../../qa/VisualQaFixtureBoundary', () => ({
-  useOptionalVisualQaFixtureRuntime: () => mockVisualQaRuntime
-}));
+jest.mock('../../qa/VisualQaFixtureBoundary', () => {
+  const globalWithCounter = globalThis as typeof globalThis & {
+    __mockRecordsBoundaryModuleLoads?: number;
+  };
+  globalWithCounter.__mockRecordsBoundaryModuleLoads =
+    (globalWithCounter.__mockRecordsBoundaryModuleLoads ?? 0) + 1;
+  return {
+    useOptionalVisualQaFixtureRuntime: () => mockVisualQaRuntime
+  };
+});
+jest.mock(
+  '../../qa/visualQaRuntime',
+  () => ({
+    useOptionalVisualQaFixtureRuntime: () => mockVisualQaRuntime
+  }),
+  { virtual: true }
+);
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
   __esModule: true,
   default: () => ({ width: 390, height: 844, scale: 3, fontScale: 1 })
@@ -237,6 +251,12 @@ function renderRecords(store: UserPreferencesStore, queryClient = createTestQuer
   return { ...view, store };
 }
 
+function recordsBoundaryModuleLoads(): number {
+  return (
+    global as typeof globalThis & { __mockRecordsBoundaryModuleLoads?: number }
+  ).__mockRecordsBoundaryModuleLoads ?? 0;
+}
+
 describe('RecordsScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -253,6 +273,24 @@ describe('RecordsScreen', () => {
     };
     fetchStatsMock.mockResolvedValue(statsSummary());
     fetchSessionsMock.mockResolvedValue([]);
+  });
+
+  afterAll(() => {
+    delete (
+      global as typeof globalThis & {
+        __mockRecordsBoundaryModuleLoads?: number;
+      }
+    ).__mockRecordsBoundaryModuleLoads;
+  });
+
+  it('does not evaluate the visual QA fixture boundary in normal records', async () => {
+    const store = await preferencesStore('user-a');
+    const view = renderRecords(store);
+
+    await waitFor(() =>
+      expect(view.getByText('完成一次练习后会出现在这里')).toBeTruthy()
+    );
+    expect(recordsBoundaryModuleLoads()).toBe(0);
   });
 
   it('shows full loading only when neither server source nor local ledger has data', async () => {

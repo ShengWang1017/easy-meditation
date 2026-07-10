@@ -1,6 +1,4 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -27,29 +25,10 @@ import {
   VisualQaSessionOverrideProvider,
   type VisualQaSessionOverride
 } from './visualQaSession';
-
-export type VisualQaFixtureRuntimeValue = {
-  state: ResolvedVisualQaFixture['id'];
-  now: ResolvedVisualQaFixture['now'];
-  authScope: ResolvedVisualQaFixture['authScope'];
-};
-
-const VisualQaFixtureRuntimeContext =
-  createContext<VisualQaFixtureRuntimeValue | null>(null);
-
-export function useVisualQaFixtureRuntime(): VisualQaFixtureRuntimeValue {
-  const value = useOptionalVisualQaFixtureRuntime();
-  if (!value) {
-    throw new Error(
-      'useVisualQaFixtureRuntime must be used inside an active visual QA fixture'
-    );
-  }
-  return value;
-}
-
-export function useOptionalVisualQaFixtureRuntime(): VisualQaFixtureRuntimeValue | null {
-  return useContext(VisualQaFixtureRuntimeContext);
-}
+import {
+  VisualQaFixtureRuntimeProvider,
+  type VisualQaFixtureRuntimeValue
+} from './visualQaRuntime';
 
 export function VisualQaFixtureBoundary({
   children,
@@ -98,11 +77,11 @@ function VisualQaRuntime({
 
   if (fixture.authScope === 'unauthenticated') {
     return (
-      <VisualQaFixtureRuntimeContext.Provider value={runtimeValue}>
+      <VisualQaFixtureRuntimeProvider value={runtimeValue}>
         <VisualQaReporter enabled state={fixture.id}>
           {children}
         </VisualQaReporter>
-      </VisualQaFixtureRuntimeContext.Provider>
+      </VisualQaFixtureRuntimeProvider>
     );
   }
 
@@ -153,7 +132,7 @@ function AuthenticatedVisualQaRuntime({
   };
 
   return (
-    <VisualQaFixtureRuntimeContext.Provider value={runtimeValue}>
+    <VisualQaFixtureRuntimeProvider value={runtimeValue}>
       <QueryClientProvider client={resources.queryClient}>
         <AuthSessionProvider value={session}>
           <VisualQaSessionOverrideProvider value={resources.sessionOverride}>
@@ -163,7 +142,7 @@ function AuthenticatedVisualQaRuntime({
           </VisualQaSessionOverrideProvider>
         </AuthSessionProvider>
       </QueryClientProvider>
-    </VisualQaFixtureRuntimeContext.Provider>
+    </VisualQaFixtureRuntimeProvider>
   );
 }
 

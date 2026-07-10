@@ -81,10 +81,12 @@ import { publicQueryKeys, userQueryKeys } from '../query/keys';
 import { usePreferencesStore } from '../store/PreferencesStoreProvider';
 import type { UserPreferencesStore } from '../store/preferencesStore';
 import {
-  VisualQaFixtureBoundary,
+  VisualQaFixtureBoundary
+} from './VisualQaFixtureBoundary';
+import {
   useVisualQaFixtureRuntime,
   type VisualQaFixtureRuntimeValue
-} from './VisualQaFixtureBoundary';
+} from './visualQaRuntime';
 import type { VisualQaState } from './visualQaContract';
 import { createTestQueryClient, renderWithProviders } from '../test/renderWithProviders';
 import type { SessionOutbox } from '../services/sessionOutbox';
