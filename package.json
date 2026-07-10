@@ -10,7 +10,15 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && npm run test:tooling",
+    "test:tooling": "node --test scripts/visual-qa/*.test.mjs scripts/perf/*.test.mjs",
+    "qa:fixture:validate": "node scripts/visual-qa/fixture.mjs qa/fixtures/mobile-prototype.json",
+    "qa:visual:web": "node scripts/visual-qa/capture-web.mjs",
+    "qa:visual:ios": "node scripts/visual-qa/capture-native.mjs ios",
+    "qa:visual:android": "node scripts/visual-qa/capture-native.mjs android",
+    "qa:visual:compare": "node scripts/visual-qa/compare.mjs",
+    "qa:perf:android": "node scripts/perf/analyze-frames.mjs",
+    "qa:perf:ios": "node scripts/perf/extract-ios-core-animation.mjs",
     "predev:api": "npm --prefix packages/shared run build",
     "dev:api": "npm --workspace apps/api run dev",
     "predev:mobile": "npm --prefix packages/shared run build",
@@ -19,6 +27,10 @@
     "db:down": "docker compose down"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "pixelmatch": "7.2.0",
+    "pngjs": "7.0.0",
+    "sharp": "0.35.3",
     "typescript": "^5.8.3"
   }
 }
