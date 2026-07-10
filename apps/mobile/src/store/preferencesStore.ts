@@ -339,19 +339,41 @@ export function createUserPreferencesStore(
           async setDurationOverride(methodId, durationMinutes) {
             const validMethodId = builtInMethodIdSchema.parse(methodId);
             await enqueuePersistedMutation(async () => {
+              const previousOverrides = get().durationOverrides;
               const validOverrides = durationOverridesSchema.parse({
-                ...get().durationOverrides,
+                ...previousOverrides,
                 [validMethodId]: durationMinutes
               });
               set({ durationOverrides: validOverrides });
-              await barrier.flush();
+              try {
+                await barrier.flush();
+              } catch (error) {
+                set({ durationOverrides: previousOverrides });
+                try {
+                  await barrier.flush();
+                } catch {
+                  // Keep the in-memory rollback if storage remains unavailable.
+                }
+                throw error;
+              }
             });
           },
           async setSoundEnabled(enabled) {
             const validEnabled = soundEnabledSchema.parse(enabled);
             await enqueuePersistedMutation(async () => {
+              const previousEnabled = get().soundEnabled;
               set({ soundEnabled: validEnabled });
-              await barrier.flush();
+              try {
+                await barrier.flush();
+              } catch (error) {
+                set({ soundEnabled: previousEnabled });
+                try {
+                  await barrier.flush();
+                } catch {
+                  // Keep the in-memory rollback if storage remains unavailable.
+                }
+                throw error;
+              }
             });
           },
           dismissBeforeStart() {

@@ -296,6 +296,43 @@ describe('user preferences persistence', () => {
     expect(memory.writes).toHaveLength(6);
   });
 
+  it('rolls back duration and sound preferences when persistence fails', async () => {
+    const scenarios: Array<{
+      userId: string;
+      mutate(state: UserPreferencesState): Promise<void>;
+      select(state: PersistedPreferences | UserPreferencesState): unknown;
+      expected: unknown;
+    }> = [
+      {
+        userId: 'duration-rollback',
+        mutate: (state) => state.setDurationOverride('box', 8),
+        select: (state) => state.durationOverrides,
+        expected: {}
+      },
+      {
+        userId: 'sound-rollback',
+        mutate: (state) => state.setSoundEnabled(false),
+        select: (state) => state.soundEnabled,
+        expected: true
+      }
+    ];
+
+    for (const scenario of scenarios) {
+      const memory = createRejectableFirstWriteStorage();
+      const store = createUserPreferencesStore(scenario.userId, memory.storage);
+      const mutation = scenario.mutate(store.getState());
+      await memory.firstWriteStarted;
+      memory.rejectFirstWrite(new Error('storage unavailable'));
+
+      await expect(mutation).rejects.toThrow('storage unavailable');
+      expect(scenario.select(store.getState())).toEqual(scenario.expected);
+      expect(
+        scenario.select(readPersisted(memory, scenario.userId).state)
+      ).toEqual(scenario.expected);
+      expect(memory.writes).toHaveLength(2);
+    }
+  });
+
   it('rolls back before-start dismissal when persistence fails', async () => {
     const values = new Map<string, string>();
     let writeAttempts = 0;
