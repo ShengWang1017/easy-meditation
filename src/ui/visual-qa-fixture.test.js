@@ -29,6 +29,19 @@ const EXPECTED_STATE_IDS = [
   'register'
 ];
 const EXPECTED_WEB_REFERENCE_IDS = EXPECTED_STATE_IDS.slice(0, 11);
+const FIXED_BOX_SESSION_STATE_IDS = [
+  'session-ready',
+  'session-inhale',
+  'session-hold',
+  'session-exhale',
+  'session-paused',
+  'session-completed'
+];
+const EXPECTED_WEB_METHODS_BY_API_ID = {
+  box: { id: 'box', title: '盒式呼吸法' },
+  'four-seven-eight': { id: 'fourSevenEight', title: '长呼气' },
+  coherent: { id: 'coherent', title: '等量呼吸法' }
+};
 
 describe('Web visual QA fixture request', () => {
   test('uses the exact 13-state whitelist and maps every supported Web state', () => {
@@ -62,6 +75,45 @@ describe('Web visual QA fixture request', () => {
       assert.ok(request.manifest.primaryElementIds.length > 0);
       assert.ok(request.manifest.textElementIds.length > 0);
     }
+  });
+
+  test('maps all stable API method IDs to approved Web fixture titles', () => {
+    const request = resolveVisualQaRequest(`${LOOPBACK_ROOT}practice`);
+    const methodsByApiId = Object.fromEntries(
+      VISUAL_QA_FIXTURE.api.methods.map((apiMethod) => {
+        const expected = EXPECTED_WEB_METHODS_BY_API_ID[apiMethod.id];
+        const webMethod = request.appOptions.methods[expected.id];
+        return [apiMethod.id, { id: webMethod.id, title: webMethod.title }];
+      })
+    );
+
+    assert.deepEqual(methodsByApiId, EXPECTED_WEB_METHODS_BY_API_ID);
+  });
+
+  test('uses the approved Web fixture title in every fixed box-session snapshot', () => {
+    assert.deepEqual(
+      WEB_REFERENCE_STATE_IDS.filter((id) => id.startsWith('session-')),
+      FIXED_BOX_SESSION_STATE_IDS
+    );
+
+    const sessionMethods = FIXED_BOX_SESSION_STATE_IDS.map((stateId) => {
+      const request = resolveVisualQaRequest(`${LOOPBACK_ROOT}${stateId}`);
+      const snapshot = createMeditationState(request.appOptions).getSnapshot();
+      return {
+        stateId,
+        methodId: snapshot.method.id,
+        methodTitle: snapshot.method.title
+      };
+    });
+
+    assert.deepEqual(
+      sessionMethods,
+      FIXED_BOX_SESSION_STATE_IDS.map((stateId) => ({
+        stateId,
+        methodId: 'box',
+        methodTitle: '盒式呼吸法'
+      }))
+    );
   });
 
   test('initializes every fixed session snapshot exactly without advancing time', () => {

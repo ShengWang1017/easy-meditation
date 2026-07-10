@@ -30,6 +30,7 @@ import {
 } from '../domain/sessionLedger';
 import { ApiRequestError } from '../api/client';
 import {
+  CUSTOM_RHYTHM_SAVE_ERROR,
   DEFAULT_PREFERENCES,
   createUserPreferencesStore,
   hydrateUserPreferencesStore,
@@ -218,6 +219,57 @@ function createRejectableNextWriteStorage(initial: Record<string, string>) {
   };
 }
 
+function createControlledWriteStorage({
+  deferredAttempts = [],
+  rejectedAttempts = []
+}: {
+  deferredAttempts?: number[];
+  rejectedAttempts?: number[];
+} = {}) {
+  type WriteControl = {
+    promise: Promise<void>;
+    resolve(): void;
+    reject(reason?: unknown): void;
+    started: Promise<void>;
+    markStarted(): void;
+  };
+  const memory = createMemoryStorage();
+  const controls = new Map<number, WriteControl>();
+  for (const attempt of deferredAttempts) {
+    let resolve!: () => void;
+    let reject!: (reason?: unknown) => void;
+    let markStarted!: () => void;
+    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    const started = new Promise<void>((resolveStarted) => {
+      markStarted = resolveStarted;
+    });
+    controls.set(attempt, { promise, resolve, reject, started, markStarted });
+  }
+  let writeAttempt = 0;
+  const storage: StateStorage = {
+    getItem: memory.storage.getItem,
+    async setItem(name, value) {
+      writeAttempt += 1;
+      memory.writes.push({ name, value });
+      const control = controls.get(writeAttempt);
+      if (control) {
+        control.markStarted();
+        await control.promise;
+      }
+      if (rejectedAttempts.includes(writeAttempt)) {
+        throw new Error(`write ${writeAttempt} failed`);
+      }
+      memory.values.set(name, value);
+    },
+    removeItem: memory.storage.removeItem
+  };
+
+  return { ...memory, controls, storage };
+}
+
 function readPersisted(storage: ReturnType<typeof createMemoryStorage>, userId: string) {
   const value = storage.values.get(preferencesStorageKey(userId));
   expect(value).toBeDefined();
@@ -294,6 +346,132 @@ describe('user preferences persistence', () => {
       'soundEnabled'
     ]);
     expect(memory.writes).toHaveLength(6);
+  });
+
+  it('composes different custom fields when the first queued write fails', async () => {
+    const userId = 'custom-composed-after-first-failure';
+    const memory = createControlledWriteStorage({ deferredAttempts: [1] });
+    const store = createUserPreferencesStore(userId, memory.storage);
+
+    const inhaleWrite = store.getState().setCustomPhase('inhaleSeconds', 7);
+    const inhaleResult = inhaleWrite.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await memory.controls.get(1)!.started;
+    const durationWrite = store.getState().setCustomDuration(10);
+
+    memory.controls.get(1)!.reject(new Error('first custom write failed'));
+
+    await expect(inhaleResult).resolves.toEqual(
+      new Error('first custom write failed')
+    );
+    await expect(durationWrite).resolves.toBeUndefined();
+    expect(store.getState()).toMatchObject({
+      customRhythm: {
+        ...DEFAULT_PREFERENCES.customRhythm,
+        inhaleSeconds: 7,
+        durationMinutes: 10
+      },
+      customRhythmSaveError: null
+    });
+    expect(readPersisted(memory, userId).state.customRhythm).toEqual({
+      ...DEFAULT_PREFERENCES.customRhythm,
+      inhaleSeconds: 7,
+      durationMinutes: 10
+    });
+  });
+
+  it('retries the complete desired custom snapshot and keeps its error until durable', async () => {
+    const userId = 'custom-combined-retry';
+    const memory = createControlledWriteStorage({
+      deferredAttempts: [1, 5],
+      rejectedAttempts: [3]
+    });
+    const store = createUserPreferencesStore(userId, memory.storage);
+
+    const inhaleWrite = store.getState().setCustomPhase('inhaleSeconds', 7);
+    const inhaleResult = inhaleWrite.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await memory.controls.get(1)!.started;
+    const durationWrite = store.getState().setCustomDuration(10);
+    const durationResult = durationWrite.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    memory.controls.get(1)!.reject(new Error('first custom write failed'));
+
+    await expect(inhaleResult).resolves.toEqual(
+      new Error('first custom write failed')
+    );
+    await expect(durationResult).resolves.toEqual(new Error('write 3 failed'));
+    expect(store.getState().customRhythmSaveError).toBe(
+      CUSTOM_RHYTHM_SAVE_ERROR
+    );
+
+    const retry = store.getState().retryCustomRhythmSave();
+    await memory.controls.get(5)!.started;
+    expect(store.getState().customRhythmSaveError).toBe(
+      CUSTOM_RHYTHM_SAVE_ERROR
+    );
+    expect(
+      JSON.parse(memory.writes[4]!.value).state.customRhythm
+    ).toEqual({
+      ...DEFAULT_PREFERENCES.customRhythm,
+      inhaleSeconds: 7,
+      durationMinutes: 10
+    });
+
+    memory.controls.get(5)!.resolve();
+    await expect(retry).resolves.toBeUndefined();
+    expect(store.getState().customRhythmSaveError).toBeNull();
+    expect(readPersisted(memory, userId).state.customRhythm).toEqual({
+      ...DEFAULT_PREFERENCES.customRhythm,
+      inhaleSeconds: 7,
+      durationMinutes: 10
+    });
+  });
+
+  it('does not let retry enqueue a stale snapshot after a fresh custom edit', async () => {
+    const userId = 'custom-new-edit-before-retry';
+    const memory = createControlledWriteStorage({
+      deferredAttempts: [1, 3]
+    });
+    const store = createUserPreferencesStore(userId, memory.storage);
+
+    const failedWrite = store.getState().setCustomPhase('inhaleSeconds', 7);
+    const failedResult = failedWrite.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await memory.controls.get(1)!.started;
+    memory.controls.get(1)!.reject(new Error('first custom write failed'));
+    await expect(failedResult).resolves.toEqual(
+      new Error('first custom write failed')
+    );
+    expect(store.getState().customRhythmSaveError).toBe(
+      CUSTOM_RHYTHM_SAVE_ERROR
+    );
+
+    const newerEdit = store.getState().setCustomDuration(10);
+    const immediateRetry = store.getState().retryCustomRhythmSave();
+    await memory.controls.get(3)!.started;
+    memory.controls.get(3)!.resolve();
+
+    await expect(newerEdit).resolves.toBeUndefined();
+    await expect(immediateRetry).resolves.toBeUndefined();
+    expect(store.getState().customRhythm).toEqual({
+      ...DEFAULT_PREFERENCES.customRhythm,
+      inhaleSeconds: 7,
+      durationMinutes: 10
+    });
+    expect(readPersisted(memory, userId).state.customRhythm).toEqual({
+      ...DEFAULT_PREFERENCES.customRhythm,
+      inhaleSeconds: 7,
+      durationMinutes: 10
+    });
   });
 
   it('rolls back duration and sound preferences when persistence fails', async () => {

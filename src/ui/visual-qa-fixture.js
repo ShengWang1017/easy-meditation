@@ -13,6 +13,11 @@ const METHOD_ID_MAP = {
   'four-seven-eight': 'fourSevenEight',
   coherent: 'coherent'
 };
+const METHOD_PRESENTATION_TITLE_MAP = {
+  box: '盒式呼吸法',
+  'four-seven-eight': '长呼气',
+  coherent: '等量呼吸法'
+};
 const FIXTURE_DATE_ADAPTER = createFixedOffsetDateAdapter(
   parseOffsetMinutes(fixture.now)
 );
@@ -329,7 +334,7 @@ function createFixtureMethods() {
         {
           id,
           category: method.category,
-          title: method.title,
+          title: METHOD_PRESENTATION_TITLE_MAP[method.id] ?? method.title,
           rhythmLabel: method.phases
             .map((phase) => phase.durationSeconds)
             .join('-'),

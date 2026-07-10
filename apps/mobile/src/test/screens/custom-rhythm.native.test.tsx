@@ -474,7 +474,13 @@ describe('CustomRhythmScreen', () => {
     await waitFor(() =>
       expect(view.queryByRole('alert', { name: '设置未保存，请重试。' })).toBeNull()
     );
-    expect(controlledStorage.setItem).toHaveBeenCalledTimes(3);
+    expect(controlledStorage.setItem).toHaveBeenCalledTimes(4);
+    expect(controlledStorage.writes.map(persistedInhaleSeconds)).toEqual([
+      5,
+      4,
+      5,
+      5
+    ]);
     expect(store.getState().customRhythm.inhaleSeconds).toBe(5);
 
     fireEvent.press(view.getByRole('button', { name: '开始呼吸' }));

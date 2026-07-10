@@ -21,17 +21,19 @@ export function SessionExitDialog({
   onEnd,
   onRetry
 }: SessionExitDialogProps) {
+  const finalizationLocked = isPersisting || error !== null;
+
   return (
     <Modal
       animationType="fade"
-      onRequestClose={isPersisting ? undefined : onContinue}
+      onRequestClose={finalizationLocked ? undefined : onContinue}
       transparent
       visible={visible}
     >
       <View accessibilityViewIsModal style={styles.overlay}>
         <Pressable
           accessibilityElementsHidden
-          disabled={isPersisting}
+          disabled={finalizationLocked}
           onPress={onContinue}
           style={StyleSheet.absoluteFill}
           testID="session-exit-backdrop"
@@ -50,13 +52,14 @@ export function SessionExitDialog({
           </View>
           <View style={styles.actions}>
             <PrototypeButton
-              disabled={isPersisting}
+              disabled={finalizationLocked}
               label="继续练习"
               onPress={onContinue}
               style={styles.action}
               variant="quiet"
             />
             <PrototypeButton
+              disabled={finalizationLocked}
               label="结束并离开"
               loading={isPersisting}
               onPress={onEnd}

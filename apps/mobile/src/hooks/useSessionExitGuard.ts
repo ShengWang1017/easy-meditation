@@ -33,6 +33,7 @@ export function useSessionExitGuard(
   const [dialogVisible, setDialogVisible] = useState(false);
   const [allowRemoval, setAllowRemoval] = useState(false);
   const pendingActionRef = useRef<unknown | null>(null);
+  const requiresRetryRef = useRef(false);
   const mountedRef = useRef(false);
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -89,6 +90,13 @@ export function useSessionExitGuard(
   }, [approvePendingAction, options.controlsUnlocked, options.snapshot.status]);
 
   const continueSession = useCallback(() => {
+    if (
+      requiresRetryRef.current ||
+      optionsRef.current.isPersisting ||
+      optionsRef.current.persistenceError !== null
+    ) {
+      return;
+    }
     pendingActionRef.current = null;
     setDialogVisible(false);
   }, []);
@@ -98,6 +106,7 @@ export function useSessionExitGuard(
       await optionsRef.current.persistIntentionalEnd();
       approvePendingAction();
     } catch (error) {
+      requiresRetryRef.current = true;
       if (mountedRef.current) setDialogVisible(true);
       throw error;
     }

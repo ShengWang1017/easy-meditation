@@ -5,7 +5,7 @@ import {
   isHiddenFromAccessibility,
   render
 } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { Modal, StyleSheet } from 'react-native';
 
 import { layout } from '../theme/tokens';
 import { SessionExitDialog } from './SessionExitDialog';
@@ -81,5 +81,41 @@ describe('SessionExitDialog', () => {
     );
     fireEvent.press(view.getByRole('button', { name: '重试保存并离开' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('only allows retry when a frozen finalization has failed', () => {
+    const onContinue = jest.fn();
+    const onEnd = jest.fn();
+    const onRetry = jest.fn();
+    const view = render(
+      <SessionExitDialog
+        error="无法在本机保存本次练习，请重试。"
+        isPersisting={false}
+        onContinue={onContinue}
+        onEnd={onEnd}
+        onRetry={onRetry}
+        visible
+      />
+    );
+
+    expect(
+      view.getByRole('button', { name: '继续练习' }).props.accessibilityState
+    ).toMatchObject({ disabled: true });
+    expect(
+      view.getByRole('button', { name: '结束并离开' }).props.accessibilityState
+    ).toMatchObject({ disabled: true });
+    const backdrop = view.getByTestId('session-exit-backdrop', {
+      includeHiddenElements: true
+    });
+    expect(backdrop.props.accessibilityState).toMatchObject({ disabled: true });
+    expect(view.UNSAFE_getByType(Modal).props.onRequestClose).toBeUndefined();
+
+    fireEvent.press(view.getByRole('button', { name: '继续练习' }));
+    fireEvent.press(backdrop);
+    expect(onContinue).not.toHaveBeenCalled();
+
+    fireEvent.press(view.getByRole('button', { name: '重试保存并离开' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onEnd).not.toHaveBeenCalled();
   });
 });

@@ -354,6 +354,127 @@ describe('apiRequest', () => {
     vi.useRealTimers();
   });
 
+  it('terminal-clears the session when a malformed refresh response returns 401', async () => {
+    vi.useFakeTimers();
+    try {
+      useAuthStore.setState({
+        accessToken: 'expired-access',
+        refreshToken: 'stale-refresh',
+        isRestoring: false,
+        isTerminating: false
+      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          headers: new Headers(),
+          json: async () => ({
+            data: null,
+            error: { code: 'UNAUTHORIZED', message: 'Access token expired.' }
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          headers: new Headers(),
+          json: async () => {
+            throw new SyntaxError('Unexpected end of JSON input');
+          }
+        });
+
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(apiRequest('/me')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        status: 401,
+        code: 'HTTP_401'
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: 'expired-access',
+        refreshToken: 'stale-refresh',
+        isTerminating: true
+      });
+
+      await vi.runAllTimersAsync();
+
+      expect(secureStore.deleteItemAsync).toHaveBeenCalledWith(
+        'easyMeditation.refreshToken'
+      );
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: null,
+        refreshToken: null,
+        isTerminating: false,
+        sessionRevision: 1
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    {
+      status: 429,
+      expectedCode: 'HTTP_429',
+      retryAfter: '23',
+      expectedRetryAfterMs: 23_000
+    },
+    {
+      status: 503,
+      expectedCode: 'HTTP_503',
+      retryAfter: '31',
+      expectedRetryAfterMs: 31_000
+    }
+  ])(
+    'preserves retry metadata when a malformed refresh response returns $status',
+    async ({ status, expectedCode, retryAfter, expectedRetryAfterMs }) => {
+      useAuthStore.setState({
+        accessToken: 'expired-access',
+        refreshToken: 'refresh-token',
+        isRestoring: false,
+        isTerminating: false
+      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          headers: new Headers(),
+          json: async () => ({
+            data: null,
+            error: { code: 'UNAUTHORIZED', message: 'Access token expired.' }
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status,
+          headers: new Headers({ 'retry-after': retryAfter }),
+          json: async () => {
+            throw new SyntaxError('Unexpected token < in JSON');
+          }
+        });
+
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(apiRequest('/practice-sessions')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        status,
+        code: expectedCode,
+        retryAfterMs: expectedRetryAfterMs
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: 'expired-access',
+        refreshToken: 'refresh-token',
+        isTerminating: false
+      });
+    }
+  );
+
   it('opens the terminal gate synchronously when a protected 401 has no refresh token', async () => {
     vi.useFakeTimers();
     useAuthStore.setState({

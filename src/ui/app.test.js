@@ -10,6 +10,14 @@ import {
 } from './visual-qa-fixture.js';
 
 const LOOPBACK_ROOT = 'http://127.0.0.1:60323/?visualQaState=';
+const EXPECTED_FIXED_SESSION_COPY = [
+  ['session-ready', '5 分钟', '盒式呼吸法'],
+  ['session-inhale', '04:58', '盒式呼吸法'],
+  ['session-hold', '04:54', '盒式呼吸法'],
+  ['session-exhale', '04:50', '盒式呼吸法'],
+  ['session-paused', '04:51', '盒式呼吸法'],
+  ['session-completed', '完成', '盒式呼吸法']
+];
 const originalWindow = globalThis.window;
 const originalAudioContext = globalThis.AudioContext;
 const originalWebkitAudioContext = globalThis.webkitAudioContext;
@@ -67,6 +75,33 @@ describe('meditation app initialization', () => {
       app.destroy();
       openApps.pop();
     }
+  });
+
+  test('renders approved Web fixture timer and title copy for all six fixed sessions', () => {
+    assert.deepEqual(
+      WEB_REFERENCE_STATE_IDS.filter((id) => id.startsWith('session-')),
+      EXPECTED_FIXED_SESSION_COPY.map(([stateId]) => stateId)
+    );
+
+    const renderedCopy = EXPECTED_FIXED_SESSION_COPY.map(([stateId]) => {
+      const { window, root } = createDom();
+      globalThis.window = window;
+      const request = resolveVisualQaRequest(`${LOOPBACK_ROOT}${stateId}`);
+      const app = createMeditationApp(root, request.appOptions);
+      openApps.push(app);
+
+      const copy = [
+        stateId,
+        root.querySelector('.focus-timer > strong')?.textContent,
+        root.querySelector('.focus-timer > span')?.textContent
+      ];
+
+      app.destroy();
+      openApps.pop();
+      return copy;
+    });
+
+    assert.deepEqual(renderedCopy, EXPECTED_FIXED_SESSION_COPY);
   });
 
   test('keeps normal mode interactive with injected clock, storage, cues, and scheduler', () => {

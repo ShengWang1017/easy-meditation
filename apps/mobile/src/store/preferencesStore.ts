@@ -209,13 +209,17 @@ export function createUserPreferencesStore(
         let lastPersistedCustomRhythm: CustomRhythm = {
           ...defaults.customRhythm
         };
+        let desiredCustomRhythm: CustomRhythm = {
+          ...defaults.customRhythm
+        };
         let latestMutationId = 0;
-        let retryMutation: CustomRhythmMutation | null = null;
+        let retrySnapshot: CustomRhythm | null = null;
         let lastCustomRhythmFailure: unknown;
 
         syncHydratedCustomRhythm = (rhythm) => {
           lastPersistedCustomRhythm = { ...rhythm };
-          retryMutation = null;
+          desiredCustomRhythm = { ...rhythm };
+          retrySnapshot = null;
           lastCustomRhythmFailure = undefined;
         };
 
@@ -241,31 +245,28 @@ export function createUserPreferencesStore(
           }
         }
 
-        function enqueueCustomRhythmMutation(
-          mutation: CustomRhythmMutation
+        function enqueueCustomRhythmSnapshot(
+          desiredSnapshot: CustomRhythm
         ): Promise<void> {
+          const snapshot = { ...desiredSnapshot };
           const mutationId = ++latestMutationId;
-          retryMutation = null;
           const runCommit = async () => {
             const previous = { ...lastPersistedCustomRhythm };
-            const next = mutation(previous);
-            set({ customRhythm: next, customRhythmSaveError: null });
+            set({ customRhythm: snapshot });
 
             try {
               await barrier.flush();
-              lastPersistedCustomRhythm = { ...next };
-              lastCustomRhythmFailure = undefined;
             } catch (writeError) {
               const isLatestMutation = mutationId === latestMutationId;
               if (isLatestMutation) {
-                retryMutation = mutation;
+                retrySnapshot = { ...snapshot };
                 lastCustomRhythmFailure = writeError;
               }
               set({
                 customRhythm: previous,
                 customRhythmSaveError: isLatestMutation
                   ? CUSTOM_RHYTHM_SAVE_ERROR
-                  : null
+                  : get().customRhythmSaveError
               });
               try {
                 await barrier.flush();
@@ -275,6 +276,21 @@ export function createUserPreferencesStore(
                 }
               }
               throw writeError;
+            }
+
+            lastPersistedCustomRhythm = { ...snapshot };
+            lastCustomRhythmFailure = undefined;
+            if (mutationId === latestMutationId) {
+              retrySnapshot = null;
+              if (get().customRhythmSaveError !== null) {
+                set({ customRhythmSaveError: null });
+                try {
+                  await barrier.flush();
+                } catch {
+                  // The desired rhythm was already durable. This follow-up write
+                  // only reflects clearing non-persisted UI error state.
+                }
+              }
             }
           };
           const commit = enqueuePersistedMutation(runCommit);
@@ -286,6 +302,14 @@ export function createUserPreferencesStore(
             }
           });
           return commit;
+        }
+
+        function enqueueCustomRhythmMutation(
+          mutation: CustomRhythmMutation
+        ): Promise<void> {
+          desiredCustomRhythm = mutation(desiredCustomRhythm);
+          retrySnapshot = null;
+          return enqueueCustomRhythmSnapshot(desiredCustomRhythm);
         }
 
         async function waitForCustomRhythmSave() {
@@ -329,12 +353,12 @@ export function createUserPreferencesStore(
           },
           waitForCustomRhythmSave,
           async retryCustomRhythmSave() {
-            const mutation = retryMutation;
-            if (!mutation) {
+            const snapshot = retrySnapshot;
+            if (!snapshot) {
               await waitForCustomRhythmSave();
               return;
             }
-            await enqueueCustomRhythmMutation(mutation);
+            await enqueueCustomRhythmSnapshot(snapshot);
           },
           async setDurationOverride(methodId, durationMinutes) {
             const validMethodId = builtInMethodIdSchema.parse(methodId);

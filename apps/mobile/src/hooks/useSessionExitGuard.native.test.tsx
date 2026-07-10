@@ -173,7 +173,7 @@ describe('useSessionExitGuard', () => {
     );
   });
 
-  it('keeps the original action on local failure and dispatches it after retry', async () => {
+  it('keeps the failed finalization locked to its original action until retry leaves', async () => {
     const action = { type: 'NAVIGATE', payload: { name: 'records' } };
     const persistIntentionalEnd = jest.fn(async () => {
       throw new Error('LOCAL_SESSION_PERSIST_FAILED');
@@ -196,6 +196,11 @@ describe('useSessionExitGuard', () => {
         }}
       />
     );
+    expect(latest.dialogVisible).toBe(true);
+    expect(view.navigation.dispatch).not.toHaveBeenCalled();
+
+    act(() => latest.continueSession());
+
     expect(latest.dialogVisible).toBe(true);
     expect(view.navigation.dispatch).not.toHaveBeenCalled();
 

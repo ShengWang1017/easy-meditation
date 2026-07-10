@@ -105,6 +105,16 @@ function buildHeaders(options: ApiRequestOptions, accessToken: string | null): H
   return headers;
 }
 
+async function parseApiEnvelope<T>(response: Response): Promise<ApiEnvelope<T> | null> {
+  try {
+    return (await response.json()) as ApiEnvelope<T>;
+  } catch {
+    // Preserve the HTTP response metadata instead of leaking a JSON parser
+    // error that would hide the response's status and retry headers.
+    return null;
+  }
+}
+
 async function sendApiRequest<T>(
   path: string,
   options: ApiRequestOptions,
@@ -114,13 +124,7 @@ async function sendApiRequest<T>(
     ...options,
     headers: buildHeaders(options, accessToken)
   });
-  let body: ApiEnvelope<T> | null = null;
-  try {
-    body = (await response.json()) as ApiEnvelope<T>;
-  } catch {
-    // Preserve the HTTP response metadata below instead of leaking a JSON
-    // parser error that would hide a retriable 429/5xx status.
-  }
+  const body = await parseApiEnvelope<T>(response);
 
   return { response, body };
 }
@@ -212,7 +216,7 @@ async function runRefreshTokenPair(
     headers: buildHeaders({ skipAuth: true }, null),
     body: JSON.stringify({ refreshToken })
   });
-  const body = (await response.json()) as ApiEnvelope<TokenPair>;
+  const body = await parseApiEnvelope<TokenPair>(response);
   const error = toApiRequestError(response, body);
 
   if (!isSessionRevisionCurrent(expectedSessionRevision)) {
@@ -220,7 +224,7 @@ async function runRefreshTokenPair(
   }
 
   if (error) {
-    if (error.status === 401 && error.code === 'INVALID_REFRESH_TOKEN') {
+    if (error.status === 401) {
       const currentTokens = getCurrentTokenPair();
       if (currentTokens && currentTokens.refreshToken !== refreshToken) {
         return currentTokens;

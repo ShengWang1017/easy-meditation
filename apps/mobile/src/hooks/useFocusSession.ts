@@ -274,7 +274,11 @@ export function useFocusSession(
   }, [refresh]);
 
   const resume = useCallback(() => {
-    if (!controlsUnlockedRef.current || snapshotRef.current.status !== 'paused') {
+    if (
+      !controlsUnlockedRef.current ||
+      entryPreparedRef.current ||
+      snapshotRef.current.status !== 'paused'
+    ) {
       return;
     }
     clockRef.current!.resume();

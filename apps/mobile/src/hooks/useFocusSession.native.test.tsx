@@ -4,6 +4,20 @@ import type { BreathingMethod } from '@easy-meditation/shared';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { AppState, type AppStateStatus } from 'react-native';
 
+type PreventRemoveCallback = (event: { data: { action: unknown } }) => void;
+
+const mockUsePreventRemove = jest.fn<
+  (preventRemove: boolean, callback: PreventRemoveCallback) => void
+>();
+
+jest.mock('@react-navigation/native', () => ({
+  CommonActions: {
+    goBack: () => ({ type: 'GO_BACK' })
+  },
+  usePreventRemove: (preventRemove: boolean, callback: PreventRemoveCallback) =>
+    mockUsePreventRemove(preventRemove, callback)
+}));
+
 jest.mock(
   '@easy-meditation/shared',
   () => ({
@@ -64,6 +78,11 @@ import {
   type FocusSessionController,
   type UseFocusSessionOptions
 } from './useFocusSession';
+import {
+  useSessionExitGuard,
+  type SessionExitGuardController,
+  type SessionExitNavigationPort
+} from './useSessionExitGuard';
 
 const IDS = [
   '11111111-1111-4111-8111-111111111111',
@@ -112,9 +131,33 @@ function deferred<T>() {
 }
 
 let latest: FocusSessionController;
+let latestExit: SessionExitGuardController;
+let registeredExit:
+  | { preventRemove: boolean; callback: PreventRemoveCallback }
+  | undefined;
 
 function Probe({ options }: { options: UseFocusSessionOptions }) {
   latest = useFocusSession(options);
+  return null;
+}
+
+function ExitProbe({
+  navigation,
+  options
+}: {
+  navigation: SessionExitNavigationPort;
+  options: UseFocusSessionOptions;
+}) {
+  latest = useFocusSession(options);
+  latestExit = useSessionExitGuard({
+    snapshot: latest.snapshot,
+    controlsUnlocked: latest.controlsUnlocked,
+    isPersisting: latest.isPersisting,
+    persistenceError: latest.persistenceError,
+    persistIntentionalEnd: latest.persistIntentionalEnd,
+    retryPersistence: latest.retryPersistence,
+    navigation
+  });
   return null;
 }
 
@@ -128,6 +171,11 @@ describe('useFocusSession', () => {
     nowMs = START_MS;
     appStateListener = null;
     removeAppStateListener = jest.fn();
+    registeredExit = undefined;
+    mockUsePreventRemove.mockReset();
+    mockUsePreventRemove.mockImplementation((preventRemove, callback) => {
+      registeredExit = { preventRemove, callback };
+    });
     jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
       if (event === 'change') appStateListener = listener;
       return { remove: removeAppStateListener };
@@ -271,6 +319,83 @@ describe('useFocusSession', () => {
     expect(putLedgerEntry).toHaveBeenCalledTimes(2);
     expect(putLedgerEntry.mock.calls[1]![0]).toEqual(firstEntry);
     expect(latest.controlsUnlocked).toBe(true);
+  });
+
+  it('never resumes a frozen finalization after its failed write becomes durable', async () => {
+    const putLedgerEntry = jest
+      .fn<(entry: LocalSessionLedgerEntry) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockResolvedValueOnce(undefined);
+    const view = harness({ putLedgerEntry });
+
+    act(() => latest.start());
+    view.elapse(1_000);
+    await act(async () => {
+      await expect(latest.persistIntentionalEnd()).rejects.toThrow(
+        'LOCAL_SESSION_PERSIST_FAILED'
+      );
+    });
+    const frozenSnapshot = latest.snapshot;
+
+    await act(async () => latest.retryPersistence());
+    act(() => latest.resume());
+    view.elapse(1_000);
+
+    expect(latest.snapshot).toEqual(frozenSnapshot);
+    expect(putLedgerEntry).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failed exit frozen through dismissal attempts and leaves after retry', async () => {
+    const action = { type: 'NAVIGATE', payload: { name: 'records' } };
+    const putLedgerEntry = jest
+      .fn<(entry: LocalSessionLedgerEntry) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockResolvedValueOnce(undefined);
+    const navigation = { dispatch: jest.fn() };
+    const audio: FocusSessionAudioPort = {
+      play: jest.fn(async () => undefined),
+      resetForReplay: jest.fn()
+    };
+    render(
+      <ExitProbe
+        navigation={navigation}
+        options={{
+          method: resolvedMethod(),
+          clockMethod,
+          putLedgerEntry,
+          outbox: { submit: jest.fn(async () => undefined) },
+          audio,
+          now: () => nowMs,
+          createClientSessionId: () => IDS[0]
+        }}
+      />
+    );
+
+    act(() => latest.start());
+    nowMs += 1_000;
+    act(() => jest.advanceTimersByTime(250));
+    act(() => registeredExit?.callback({ data: { action } }));
+    await act(async () => {
+      await expect(latestExit.endAndLeave()).rejects.toThrow(
+        'LOCAL_SESSION_PERSIST_FAILED'
+      );
+    });
+    const frozenSnapshot = latest.snapshot;
+
+    act(() => latestExit.continueSession());
+    expect(latestExit.dialogVisible).toBe(true);
+    expect(navigation.dispatch).not.toHaveBeenCalled();
+
+    await act(async () => latestExit.retryAndLeave());
+    await waitFor(() => expect(navigation.dispatch).toHaveBeenCalledWith(action));
+
+    act(() => latest.resume());
+    nowMs += 1_000;
+    act(() => jest.advanceTimersByTime(250));
+    expect(latest.snapshot).toEqual(frozenSnapshot);
+    expect(putLedgerEntry.mock.calls[1]![0]).toEqual(
+      putLedgerEntry.mock.calls[0]![0]
+    );
   });
 
   it('creates no record at 999ms and creates one at 1000ms', async () => {
