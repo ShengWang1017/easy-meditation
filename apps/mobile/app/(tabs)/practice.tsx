@@ -1,312 +1,420 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import type { ImageSourcePropType } from 'react-native';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { BreathingMethod } from '@easy-meditation/shared';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View
+} from 'react-native';
+
 import { fetchBreathingMethods } from '../../src/api/methods';
-import { Screen } from '../../src/components/Screen';
-import { colors, methodTint, radii, shadowSoft, spacing, type } from '../../src/theme/tokens';
+import { AppText } from '../../src/components/AppText';
+import { BeforeStartCard } from '../../src/components/BeforeStartCard';
+import { ModeCard, type ModeCardViewModel } from '../../src/components/ModeCard';
+import { PrototypeButton } from '../../src/components/PrototypeButton';
+import { PrototypeIconButton } from '../../src/components/PrototypeIconButton';
+import { PrototypeScreen } from '../../src/components/PrototypeScreen';
+import {
+  buildMethodPresentationSlots,
+  type BuiltInMethodId,
+  type MethodPresentationSlot
+} from '../../src/domain/methodPresentation';
+import { publicQueryKeys } from '../../src/query/keys';
+import { usePreferencesStore } from '../../src/store/PreferencesStoreProvider';
+import { referenceImages } from '../../src/theme/assets';
+import { colors, layout, typography } from '../../src/theme/tokens';
 
-const PETALS: Record<string, ImageSourcePropType> = {
-  box: require('../../assets/reference-style/petal-box.png'),
-  'four-seven-eight': require('../../assets/reference-style/petal-sleep.png'),
-  coherent: require('../../assets/reference-style/petal-focus.png')
+const SLOT_COLORS: Record<MethodPresentationSlot['id'], string> = {
+  box: colors.lilac,
+  'four-seven-eight': colors.periwinkle,
+  coherent: colors.blue,
+  custom: colors.mintBlue
 };
-const DANDELION = require('../../assets/reference-style/dandelion-card.png') as ImageSourcePropType;
 
-function rhythmDigits(method: BreathingMethod): string {
-  return method.phases.map((phase) => phase.durationSeconds).join('-');
+function isBuiltInId(
+  id: MethodPresentationSlot['id']
+): id is BuiltInMethodId {
+  return id !== 'custom';
 }
 
-function MethodCard({ method }: { method: BreathingMethod }) {
-  const tint = methodTint(method.id);
-  const petal = PETALS[method.id];
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={() =>
-        router.push({ pathname: '/session/[methodId]', params: { methodId: method.id } })
-      }
-      style={({ pressed }) => [
-        styles.card,
-        { backgroundColor: tint.bg, borderColor: tint.border },
-        pressed ? styles.cardPressed : null
-      ]}
-    >
-      {petal ? (
-        <Image source={petal} style={styles.petal} resizeMode="contain" />
-      ) : null}
-      <View style={styles.cardTop}>
-        <Text style={styles.cardTitle}>{method.title}</Text>
-        <Text style={styles.cardRhythm}>{rhythmDigits(method)}</Text>
-      </View>
-      <View style={styles.cardFooter}>
-        {tint.mood ? (
-          <View style={styles.moodPill}>
-            <Text style={styles.moodText}>{tint.mood}</Text>
-          </View>
-        ) : (
-          <View />
-        )}
-        <Text style={styles.duration}>{Math.round(method.defaultDurationSeconds / 60)} 分钟</Text>
-      </View>
-    </Pressable>
-  );
+function defaultDurationMinutes(slot: MethodPresentationSlot): number {
+  return Math.max(1, Math.round((slot.method?.defaultDurationSeconds ?? 60) / 60));
 }
 
 export default function PracticeScreen() {
+  const { width } = useWindowDimensions();
+  const compact = width <= 380;
+  const customRhythm = usePreferencesStore((state) => state.customRhythm);
+  const durationOverrides = usePreferencesStore((state) => state.durationOverrides);
+  const beforeStartDismissed = usePreferencesStore(
+    (state) => state.beforeStartDismissed
+  );
+  const setDurationOverride = usePreferencesStore(
+    (state) => state.setDurationOverride
+  );
+  const dismissBeforeStart = usePreferencesStore(
+    (state) => state.dismissBeforeStart
+  );
   const methodsQuery = useQuery({
-    queryKey: ['breathing-methods'],
+    queryKey: publicQueryKeys.methods,
     queryFn: fetchBreathingMethods
   });
-  const methods = methodsQuery.data ?? [];
+  const [activeDurationId, setActiveDurationId] =
+    useState<BuiltInMethodId | null>(null);
 
-  if (methodsQuery.isLoading && methods.length === 0) {
+  if (methodsQuery.isLoading && !methodsQuery.data) {
     return (
-      <Screen>
-        <View style={styles.state}>
-          <ActivityIndicator color={colors.accentStrong} size="large" />
-          <Text style={styles.stateText}>正在加载练习方法...</Text>
-        </View>
-      </Screen>
+      <PrototypeScreen
+        backgroundVariant="practice"
+        contentStyle={styles.centerState}
+        testID="practice-loading"
+      >
+        <ActivityIndicator color={colors.teal} size="large" />
+        <AppText tone="muted">正在加载呼吸训练…</AppText>
+      </PrototypeScreen>
     );
   }
 
-  if (methodsQuery.isError && methods.length === 0) {
+  if (methodsQuery.isError && !methodsQuery.data) {
     return (
-      <Screen>
-        <View style={styles.state}>
-          <Text style={styles.title}>练习方法暂时不可用</Text>
-          <Text style={styles.description}>请检查网络连接后，重新加载列表。</Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => void methodsQuery.refetch()}
-            style={({ pressed }) => [styles.retryButton, pressed ? styles.buttonPressed : null]}
-          >
-            <Text style={styles.retryButtonText}>重新加载</Text>
-          </Pressable>
-        </View>
-      </Screen>
+      <PrototypeScreen
+        backgroundVariant="practice"
+        contentStyle={styles.centerState}
+        testID="practice-error"
+      >
+        <AppText
+          accessibilityRole="header"
+          style={styles.errorTitle}
+          variant="displaySection"
+        >
+          呼吸训练暂时不可用
+        </AppText>
+        <AppText style={styles.errorMessage} tone="muted">
+          请检查网络连接后重试。
+        </AppText>
+        <PrototypeButton
+          label="重试"
+          onPress={() => void methodsQuery.refetch()}
+          style={styles.retryButton}
+        />
+      </PrototypeScreen>
     );
   }
 
-  if (methods.length === 0) {
-    return (
-      <Screen>
-        <View style={styles.state}>
-          <Text style={styles.title}>还没有可用的练习方法</Text>
-          <Text style={styles.description}>稍后再来看看，或确认后端服务已经启动。</Text>
-        </View>
-      </Screen>
+  const slots = buildMethodPresentationSlots(methodsQuery.data ?? [], customRhythm);
+  const hasMissingBuiltIn = slots.some(
+    (slot) => slot.kind === 'built_in' && slot.availability === 'unavailable'
+  );
+  const warningMessage = methodsQuery.isError
+    ? '无法刷新呼吸训练，当前显示上次加载的内容。'
+    : hasMissingBuiltIn
+      ? '部分呼吸训练暂时不可用，请重试。'
+      : null;
+  const viewModels: ModeCardViewModel[] = slots.map((slot) => {
+    const durationMinutes = isBuiltInId(slot.id)
+      ? durationOverrides[slot.id] ?? defaultDurationMinutes(slot)
+      : customRhythm.durationMinutes;
+
+    return {
+      ...slot,
+      backgroundColor: SLOT_COLORS[slot.id],
+      durationMinutes,
+      durationPopoverOpen: slot.id === activeDurationId
+    };
+  });
+
+  function closeDuration() {
+    setActiveDurationId(null);
+  }
+
+  function openGuide() {
+    if (activeDurationId) {
+      closeDuration();
+      return;
+    }
+    router.push('/guide');
+  }
+
+  function openCustomEditor() {
+    if (activeDurationId) {
+      closeDuration();
+      return;
+    }
+    router.push('/custom-rhythm');
+  }
+
+  function startBuiltIn(viewModel: ModeCardViewModel) {
+    if (activeDurationId) {
+      closeDuration();
+      return;
+    }
+    const methodId = viewModel.id;
+    if (
+      viewModel.kind !== 'built_in' ||
+      !isBuiltInId(methodId) ||
+      viewModel.availability !== 'available'
+    ) {
+      return;
+    }
+
+    router.push({
+      pathname: '/session/[methodId]',
+      params: { methodId }
+    });
+  }
+
+  function toggleDuration(viewModel: ModeCardViewModel) {
+    const methodId = viewModel.id;
+    if (
+      viewModel.kind !== 'built_in' ||
+      !isBuiltInId(methodId) ||
+      viewModel.availability !== 'available'
+    ) {
+      return;
+    }
+    setActiveDurationId((current) =>
+      current === methodId ? null : methodId
     );
+  }
+
+  async function changeDuration(
+    viewModel: ModeCardViewModel,
+    minutes: number
+  ) {
+    const methodId = viewModel.id;
+    if (viewModel.kind !== 'built_in' || !isBuiltInId(methodId)) {
+      return;
+    }
+    await setDurationOverride(methodId, minutes);
+  }
+
+  async function dismissBeforeCard() {
+    if (activeDurationId) {
+      closeDuration();
+      return;
+    }
+    await dismissBeforeStart();
+  }
+
+  function retryMethods() {
+    if (activeDurationId) {
+      closeDuration();
+      return;
+    }
+    void methodsQuery.refetch();
   }
 
   return (
-    <Screen scrollable>
-      <View style={styles.header}>
-        <Text style={styles.kicker}>今日练习</Text>
-        <Text style={styles.title}>选择一种呼吸节奏</Text>
-        <Text style={styles.description}>
-          先进入一个安静、明确的练习流程。开始后会进入本地专注计时，不会在这一步提交记录。
-        </Text>
+    <PrototypeScreen
+      backgroundVariant="practice"
+      contentStyle={[styles.content, compact ? styles.contentCompact : null]}
+      scrollable
+      testID="practice-screen"
+    >
+      {activeDurationId ? (
+        <Pressable
+          accessibilityLabel="关闭训练时长设置"
+          accessibilityRole="button"
+          onPress={closeDuration}
+          style={styles.durationBackdrop}
+          testID="practice-duration-backdrop"
+        />
+      ) : null}
+
+      <View style={styles.header} testID="practice-header">
+        <PrototypeIconButton
+          accessibilityLabel="返回呼吸训练首页"
+          imageStyle={styles.headerIcon}
+          onPress={activeDurationId ? closeDuration : () => router.back()}
+          source={referenceImages.back}
+          style={styles.headerButton}
+        />
+        <AppText
+          accessibilityRole="header"
+          numberOfLines={1}
+          style={styles.headerTitle}
+          variant="displayTitle"
+        >
+          呼吸训练
+        </AppText>
+        <PrototypeIconButton
+          accessibilityLabel="了解呼吸训练和冥想"
+          imageStyle={styles.infoIcon}
+          onPress={openGuide}
+          source={referenceImages.info}
+          style={styles.headerButton}
+        />
       </View>
 
-      {methodsQuery.isError ? (
-        <View style={styles.warning}>
-          <View style={styles.warningCopy}>
-            <Text style={styles.warningTitle}>列表更新失败</Text>
-            <Text style={styles.warningText}>已显示上次加载的练习方法，可稍后重试。</Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => void methodsQuery.refetch()}
-            style={({ pressed }) => [styles.warningButton, pressed ? styles.buttonPressed : null]}
-          >
-            <Text style={styles.warningButtonText}>重试</Text>
-          </Pressable>
+      <View style={[styles.intro, compact ? styles.introCompact : null]}>
+        <AppText
+          style={[
+            styles.introText,
+            compact ? styles.introTextCompact : null
+          ]}
+          variant="displayTitle"
+        >
+          选择要进行的呼吸训练。
+        </AppText>
+      </View>
+
+      {warningMessage ? (
+        <View style={styles.warning} testID="practice-warning">
+          <AppText style={styles.warningText} tone="muted" variant="meta">
+            {warningMessage}
+          </AppText>
+          <PrototypeButton
+            label="重试"
+            onPress={retryMethods}
+            style={styles.warningButton}
+            variant="quiet"
+          />
         </View>
       ) : null}
 
-      <View style={styles.grid}>
-        {methods.map((method) => (
-          <MethodCard key={method.id} method={method} />
+      <View
+        style={[
+          styles.grid,
+          { gap: compact ? layout.compactGridGap : layout.gridGap },
+          activeDurationId ? styles.gridWithPopover : null
+        ]}
+        testID="practice-mode-grid"
+      >
+        {[viewModels.slice(0, 2), viewModels.slice(2, 4)].map((row, rowIndex) => (
+          <View
+            key={`practice-row-${rowIndex}`}
+            style={[
+              styles.gridRow,
+              { gap: compact ? layout.compactGridGap : layout.gridGap }
+            ]}
+          >
+            {row.map((viewModel) => (
+              <ModeCard
+                key={viewModel.id}
+                onDurationChange={(minutes) => changeDuration(viewModel, minutes)}
+                onOpenCustomEditor={openCustomEditor}
+                onOpenDuration={() => toggleDuration(viewModel)}
+                onPress={() => startBuiltIn(viewModel)}
+                onRequestCloseDuration={closeDuration}
+                viewModel={viewModel}
+              />
+            ))}
+          </View>
         ))}
       </View>
 
-      <View style={styles.beforeCard}>
-        <View style={styles.beforeCopy}>
-          <Text style={styles.beforeTitle}>在您开始前</Text>
-          <Text style={styles.beforeText}>了解每项呼吸训练的原理，几次呼吸就能回到平静。</Text>
+      {!beforeStartDismissed ? (
+        <View style={styles.beforeWrap}>
+          <BeforeStartCard
+            onDismiss={dismissBeforeCard}
+            onOpenGuide={openGuide}
+          />
         </View>
-        <Image source={DANDELION} style={styles.beforeImage} resizeMode="contain" />
-      </View>
-    </Screen>
+      ) : null}
+    </PrototypeScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    gap: spacing.sm
+  content: {
+    paddingBottom: 24,
+    paddingTop: 8,
+    position: 'relative'
   },
-  kicker: {
-    ...type.label,
-    color: colors.accentStrong
+  contentCompact: {
+    paddingTop: 8
   },
-  title: {
-    ...type.hero,
-    color: colors.ink
-  },
-  description: {
-    ...type.body,
-    color: colors.muted
-  },
-  grid: {
-    marginTop: spacing.xl,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: spacing.md
-  },
-  card: {
-    width: '47.5%',
-    minHeight: 172,
-    justifyContent: 'space-between',
-    borderRadius: radii.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    overflow: 'hidden',
-    ...shadowSoft
-  },
-  cardPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.985 }]
-  },
-  petal: {
-    position: 'absolute',
-    right: -18,
-    bottom: -14,
-    width: 128,
-    height: 128,
-    opacity: 0.55
-  },
-  cardTop: {
-    gap: spacing.xs
-  },
-  cardTitle: {
-    ...type.cardTitle,
-    color: colors.ink
-  },
-  cardRhythm: {
-    ...type.meta,
-    color: colors.accentStrong,
-    letterSpacing: 1
-  },
-  cardFooter: {
-    flexDirection: 'row',
+  centerState: {
     alignItems: 'center',
-    justifyContent: 'space-between'
+    gap: 16,
+    justifyContent: 'center'
   },
-  moodPill: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)'
+  errorTitle: {
+    color: colors.ink,
+    textAlign: 'center'
   },
-  moodText: {
-    ...type.meta,
-    color: colors.accent
-  },
-  duration: {
-    ...type.label,
-    color: colors.accentStrong
-  },
-  beforeCard: {
-    marginTop: spacing.xl,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.6)',
-    ...shadowSoft
-  },
-  beforeCopy: {
-    flex: 1,
-    gap: spacing.xs
-  },
-  beforeTitle: {
-    ...type.section,
-    color: colors.ink
-  },
-  beforeText: {
-    ...type.meta,
-    color: colors.muted,
-    lineHeight: 20
-  },
-  beforeImage: {
-    width: 72,
-    height: 72,
-    borderRadius: radii.md
-  },
-  warning: {
-    marginTop: spacing.xl,
-    gap: spacing.md,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    backgroundColor: 'rgba(188, 126, 72, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(188, 126, 72, 0.24)'
-  },
-  warningCopy: {
-    gap: spacing.xs
-  },
-  warningTitle: {
-    ...type.label,
-    color: colors.ink
-  },
-  warningText: {
-    ...type.meta,
-    color: colors.muted
-  },
-  warningButton: {
-    alignSelf: 'flex-start',
-    minHeight: 40,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.surfaceStrong
-  },
-  warningButtonText: {
-    ...type.label,
-    color: colors.accentStrong
-  },
-  state: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md
-  },
-  stateText: {
-    ...type.body,
-    color: colors.muted
+  errorMessage: {
+    textAlign: 'center'
   },
   retryButton: {
-    minHeight: 48,
-    borderRadius: radii.md,
+    marginTop: 4
+  },
+  durationBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3
+  },
+  header: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-    backgroundColor: colors.accentStrong
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 50
   },
-  retryButtonText: {
-    ...type.body,
-    fontWeight: '700',
-    color: colors.surfaceStrong
+  headerButton: {
+    height: 50,
+    minHeight: 50,
+    minWidth: 50,
+    width: 50
   },
-  buttonPressed: {
-    opacity: 0.86
+  headerIcon: {
+    height: 34,
+    width: 34
+  },
+  infoIcon: {
+    height: 37,
+    width: 37
+  },
+  headerTitle: {
+    ...typography.header,
+    color: colors.ink,
+    flex: 1,
+    textAlign: 'center'
+  },
+  intro: {
+    marginBottom: 22,
+    marginTop: 46
+  },
+  introCompact: {
+    marginTop: 42
+  },
+  introText: {
+    ...typography.intro,
+    color: colors.ink
+  },
+  introTextCompact: {
+    fontSize: 24,
+    lineHeight: 30.72
+  },
+  warning: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.48)',
+    borderRadius: 18,
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 12,
+    minHeight: 44,
+    paddingLeft: 14
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18
+  },
+  warningButton: {
+    minHeight: 44,
+    paddingHorizontal: 12
+  },
+  grid: {
+    position: 'relative'
+  },
+  gridWithPopover: {
+    zIndex: 4
+  },
+  gridRow: {
+    flexDirection: 'row'
+  },
+  beforeWrap: {
+    marginTop: 24
   }
 });
