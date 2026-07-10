@@ -3,6 +3,7 @@ import type { AuthLoginInput, AuthRegisterInput } from '@easy-meditation/shared'
 import { ApiRequestError } from '../api/client';
 import { useAuthStore } from './authStore';
 import * as authApi from '../api/auth';
+import { activeUserScopeCoordinator } from '../query/client';
 
 const secureStore = vi.hoisted(() => ({
   setItemAsync: vi.fn(),
@@ -32,7 +33,10 @@ describe('useAuthStore', () => {
     useAuthStore.setState({
       accessToken: null,
       refreshToken: null,
-      isRestoring: true
+      isRestoring: true,
+      restoreError: null,
+      sessionRevision: 0,
+      isTerminating: false
     });
   });
 
@@ -53,7 +57,8 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: 'new-access',
       refreshToken: 'new-refresh',
-      isRestoring: false
+      isRestoring: false,
+      sessionRevision: 1
     });
   });
 
@@ -74,7 +79,8 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: 'restored-access',
       refreshToken: 'rotated-refresh',
-      isRestoring: false
+      isRestoring: false,
+      sessionRevision: 1
     });
   });
 
@@ -135,8 +141,9 @@ describe('useAuthStore', () => {
     expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
-      refreshToken: null,
-      isRestoring: false
+      refreshToken: 'saved-refresh',
+      isRestoring: false,
+      restoreError: expect.any(ApiRequestError)
     });
   });
 
@@ -149,12 +156,13 @@ describe('useAuthStore', () => {
     expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
-      refreshToken: null,
-      isRestoring: false
+      refreshToken: 'saved-refresh',
+      isRestoring: false,
+      restoreError: expect.any(TypeError)
     });
   });
 
-  it('clears local auth state when secure storage read fails during restore', async () => {
+  it('keeps retry material when secure storage read fails during restore', async () => {
     useAuthStore.setState({
       accessToken: 'stale-access',
       refreshToken: 'stale-refresh',
@@ -170,9 +178,10 @@ describe('useAuthStore', () => {
 
     expect(refreshSpy).not.toHaveBeenCalled();
     expect(useAuthStore.getState()).toMatchObject({
-      accessToken: null,
-      refreshToken: null,
-      isRestoring: false
+      accessToken: 'stale-access',
+      refreshToken: 'stale-refresh',
+      isRestoring: false,
+      restoreError: expect.any(Error)
     });
   });
 
@@ -204,7 +213,8 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: 'registered-access',
       refreshToken: 'registered-refresh',
-      isRestoring: false
+      isRestoring: false,
+      sessionRevision: 1
     });
   });
 
@@ -223,8 +233,102 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
       refreshToken: null,
-      isRestoring: false
+      isRestoring: false,
+      sessionRevision: 1
     });
+  });
+
+  it('does not increment the session revision for refresh-token rotation', async () => {
+    useAuthStore.setState({
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      isRestoring: false,
+      sessionRevision: 7
+    });
+
+    await useAuthStore.getState().acceptRefreshedTokens(
+      { accessToken: 'new-access', refreshToken: 'new-refresh' },
+      'old-refresh'
+    );
+
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'new-access',
+      refreshToken: 'new-refresh',
+      sessionRevision: 7
+    });
+  });
+
+  it('keeps tokens visible until logout retires the active user scope', async () => {
+    useAuthStore.setState({
+      accessToken: 'session-access',
+      refreshToken: 'session-refresh',
+      isRestoring: false,
+      sessionRevision: 4
+    });
+    vi.spyOn(authApi, 'logout').mockResolvedValue(undefined);
+    let releaseRetirement!: () => void;
+    vi.spyOn(activeUserScopeCoordinator, 'retire').mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseRetirement = resolve;
+      })
+    );
+
+    const logout = useAuthStore.getState().logout();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'session-access',
+      refreshToken: 'session-refresh',
+      sessionRevision: 4,
+      isTerminating: true
+    });
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+
+    releaseRetirement();
+    await logout;
+
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      sessionRevision: 5
+    });
+  });
+
+  it('opens the terminal gate synchronously and clears on a macrotask after retirement', async () => {
+    vi.useFakeTimers();
+    useAuthStore.setState({
+      accessToken: 'session-access',
+      refreshToken: null,
+      isRestoring: false,
+      sessionRevision: 2,
+      isTerminating: false
+    });
+    const retireSpy = vi
+      .spyOn(activeUserScopeCoordinator, 'retire')
+      .mockResolvedValue(undefined);
+
+    useAuthStore.getState().requestTerminalSessionClear();
+    useAuthStore.getState().requestTerminalSessionClear();
+
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'session-access',
+      isTerminating: true,
+      sessionRevision: 2
+    });
+    expect(retireSpy).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+
+    expect(retireSpy).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isTerminating: false,
+      sessionRevision: 3
+    });
+    vi.useRealTimers();
   });
 
   it('still clears local auth state when backend logout revocation fails', async () => {

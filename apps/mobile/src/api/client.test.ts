@@ -45,7 +45,10 @@ describe('apiRequest', () => {
     useAuthStore.setState({
       accessToken: 'access-token',
       refreshToken: null,
-      isRestoring: false
+      isRestoring: false,
+      restoreError: null,
+      sessionRevision: 0,
+      isTerminating: false
     });
   });
 
@@ -104,7 +107,7 @@ describe('apiRequest', () => {
       })
     );
 
-    await expect(apiRequest('/auth/login')).rejects.toMatchObject({
+    await expect(apiRequest('/auth/login', { skipAuth: true })).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 401,
       code: 'INVALID_CREDENTIALS',
@@ -174,7 +177,8 @@ describe('apiRequest', () => {
     });
   });
 
-  it('clears auth state when an authenticated retry sees an invalid refresh token', async () => {
+  it('opens the terminal gate when refresh is invalid and clears on a macrotask', async () => {
+    vi.useFakeTimers();
     useAuthStore.setState({
       accessToken: 'expired-access',
       refreshToken: 'stale-refresh',
@@ -208,12 +212,114 @@ describe('apiRequest', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'expired-access',
+      refreshToken: 'stale-refresh',
+      isTerminating: true
+    });
+
+    await vi.runAllTimersAsync();
+
     expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
       refreshToken: null,
-      isRestoring: false
+      isRestoring: false,
+      isTerminating: false,
+      sessionRevision: 1
     });
+    vi.useRealTimers();
+  });
+
+  it('opens the terminal gate synchronously when a protected 401 has no refresh token', async () => {
+    vi.useFakeTimers();
+    useAuthStore.setState({
+      accessToken: 'expired-access',
+      refreshToken: null,
+      isRestoring: false,
+      isTerminating: false
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          data: null,
+          error: { code: 'UNAUTHORIZED', message: 'Access token expired.' }
+        })
+      })
+    );
+
+    const request = apiRequest('/stats/summary');
+    await expect(request).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'expired-access',
+      isTerminating: true
+    });
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('throws the retry 401 before terminal cleanup retires the user query', async () => {
+    vi.useFakeTimers();
+    useAuthStore.setState({
+      accessToken: 'expired-access',
+      refreshToken: 'refresh-token',
+      isRestoring: false,
+      isTerminating: false
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          data: null,
+          error: { code: 'UNAUTHORIZED', message: 'Expired.' }
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: { accessToken: 'fresh-access', refreshToken: 'rotated-refresh' },
+          error: null
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          data: null,
+          error: { code: 'UNAUTHORIZED', message: 'Still unauthorized.' }
+        })
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiRequest('/stats/summary')).rejects.toMatchObject({
+      status: 401,
+      message: 'Still unauthorized.'
+    });
+
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'fresh-access',
+      refreshToken: 'rotated-refresh',
+      isTerminating: true
+    });
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isTerminating: false
+    });
+    vi.useRealTimers();
   });
 
   it('shares a single refresh rotation across concurrent authenticated 401s', async () => {

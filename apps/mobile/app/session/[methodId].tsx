@@ -11,9 +11,11 @@ import {
   createPracticeSession
 } from '../../src/api/sessions';
 import { BreathingOrb } from '../../src/components/BreathingOrb';
+import { useAuthSession } from '../../src/auth/AuthSessionBoundary';
 import { Screen } from '../../src/components/Screen';
 import type { SessionClockSnapshot } from '../../src/domain/sessionClock';
 import { createSessionClock } from '../../src/domain/sessionClock';
+import { publicQueryKeys, userQueryKeys } from '../../src/query/keys';
 import { colors, methodTint, radii, spacing } from '../../src/theme/tokens';
 
 function orbScaleFor(snapshot: SessionClockSnapshot): number {
@@ -36,9 +38,10 @@ function orbScaleFor(snapshot: SessionClockSnapshot): number {
 
 export default function SessionScreen() {
   const { methodId } = useLocalSearchParams<{ methodId: string }>();
+  const { userId } = useAuthSession();
   const queryClient = useQueryClient();
   const methodsQuery = useQuery({
-    queryKey: ['breathing-methods'],
+    queryKey: publicQueryKeys.methods,
     queryFn: fetchBreathingMethods
   });
   const method = methodsQuery.data?.find((item) => item.id === methodId);
@@ -57,7 +60,10 @@ export default function SessionScreen() {
   const submitSessionMutation = useMutation({
     mutationFn: createPracticeSession,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['stats-summary'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: userQueryKeys.stats(userId) }),
+        queryClient.invalidateQueries({ queryKey: userQueryKeys.sessions(userId) })
+      ]);
     }
   });
 

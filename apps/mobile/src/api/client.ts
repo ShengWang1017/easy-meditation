@@ -1,8 +1,7 @@
 import type { TokenPair } from '@easy-meditation/shared';
 import Constants from 'expo-constants';
-import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { REFRESH_TOKEN_KEY, useAuthStore } from '../store/authStore';
+import { useAuthStore } from '../store/authStore';
 
 export type ApiRequestOptions = RequestInit & {
   skipAuth?: boolean;
@@ -118,38 +117,6 @@ function toApiRequestError<T>(response: Response, body: ApiEnvelope<T>): ApiRequ
   });
 }
 
-async function clearAuthState(): Promise<void> {
-  try {
-    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-  } catch {
-    // Best-effort secure storage cleanup: clear local state even if deletion fails.
-  }
-
-  useAuthStore.setState({
-    accessToken: null,
-    refreshToken: null,
-    isRestoring: false
-  });
-}
-
-async function storeTokenPair(tokens: TokenPair): Promise<void> {
-  useAuthStore.setState({
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    isRestoring: false
-  });
-
-  try {
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
-  } catch {
-    try {
-      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-    } catch {
-      // Best-effort cleanup: keep the fresh in-memory session even if secure storage stays stale.
-    }
-  }
-}
-
 function getCurrentTokenPair(): TokenPair | null {
   const { accessToken, refreshToken } = useAuthStore.getState();
   if (!accessToken || !refreshToken) {
@@ -175,7 +142,7 @@ async function runRefreshTokenPair(refreshToken: string): Promise<TokenPair> {
         return currentTokens;
       }
 
-      await clearAuthState();
+      useAuthStore.getState().requestTerminalSessionClear();
     }
 
     throw error;
@@ -185,8 +152,23 @@ async function runRefreshTokenPair(refreshToken: string): Promise<TokenPair> {
     throw new Error(GENERIC_REQUEST_ERROR_MESSAGE);
   }
 
-  await storeTokenPair(body.data);
-  return body.data;
+  const accepted = await useAuthStore
+    .getState()
+    .acceptRefreshedTokens(body.data, refreshToken);
+  if (accepted) {
+    return body.data;
+  }
+
+  const currentTokens = getCurrentTokenPair();
+  if (currentTokens && currentTokens.refreshToken !== refreshToken) {
+    return currentTokens;
+  }
+
+  throw new ApiRequestError({
+    status: 401,
+    code: 'AUTH_SESSION_TERMINATING',
+    message: 'The authenticated session is ending.'
+  });
 }
 
 async function refreshTokenPair(refreshToken: string): Promise<TokenPair> {
@@ -220,6 +202,9 @@ export async function apiRequest<T>(
       const retryError = toApiRequestError(retry.response, retry.body);
 
       if (retryError) {
+        if (retryError.status === 401) {
+          useAuthStore.getState().requestTerminalSessionClear();
+        }
         throw retryError;
       }
 
@@ -229,6 +214,8 @@ export async function apiRequest<T>(
 
       return retry.body.data;
     }
+
+    useAuthStore.getState().requestTerminalSessionClear();
   }
 
   if (firstError) {

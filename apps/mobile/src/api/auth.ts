@@ -1,4 +1,10 @@
-import type { AuthLoginInput, AuthRegisterInput, Me, TokenPair } from '@easy-meditation/shared';
+import {
+  meSchema,
+  type AuthLoginInput,
+  type AuthRegisterInput,
+  type Me,
+  type TokenPair
+} from '@easy-meditation/shared';
 import { apiRequest } from './client';
 
 export async function login(input: AuthLoginInput): Promise<TokenPair> {
@@ -34,5 +40,5 @@ export async function logout(refreshToken: string): Promise<void> {
 }
 
 export async function getMe(): Promise<Me> {
-  return apiRequest<Me>('/me');
+  return meSchema.parse(await apiRequest<Me>('/me'));
 }

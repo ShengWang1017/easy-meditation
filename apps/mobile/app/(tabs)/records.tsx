@@ -2,8 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { secondsToTimerLabel } from '@easy-meditation/shared';
 import { fetchStatsSummary } from '../../src/api/stats';
+import { useAuthSession } from '../../src/auth/AuthSessionBoundary';
 import { Heatmap } from '../../src/components/Heatmap';
 import { Screen } from '../../src/components/Screen';
+import { userQueryKeys } from '../../src/query/keys';
 import { colors, radii, shadowSoft, spacing, type } from '../../src/theme/tokens';
 
 function formatMinutes(seconds: number) {
@@ -11,8 +13,9 @@ function formatMinutes(seconds: number) {
 }
 
 export default function RecordsScreen() {
+  const { userId } = useAuthSession();
   const statsQuery = useQuery({
-    queryKey: ['stats-summary'],
+    queryKey: userQueryKeys.stats(userId),
     queryFn: fetchStatsSummary
   });
   const stats = statsQuery.data;
