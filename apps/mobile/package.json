@@ -13,10 +13,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "npm --prefix ../../packages/shared run build",
     "pretest:unit": "npm --prefix ../../packages/shared run build",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --exclude scripts/cue-waveform.test.mjs",
     "pretest:native": "npm --prefix ../../packages/shared run build",
     "test:native": "jest --runInBand",
-    "test": "npm run test:unit && npm run test:native"
+    "test:assets": "node --test scripts/cue-waveform.test.mjs",
+    "test": "npm run test:unit && npm run test:native && npm run test:assets"
   },
   "dependencies": {
     "@easy-meditation/shared": "file:../../packages/shared",
