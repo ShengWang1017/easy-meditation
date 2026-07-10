@@ -251,7 +251,7 @@ describe('useAuthStore', () => {
 
     await useAuthStore.getState().logout();
 
-    expect(authApi.logout).toHaveBeenCalledWith('session-refresh');
+    expect(authApi.logout).toHaveBeenCalledWith('session-refresh', expect.anything());
     expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
@@ -304,10 +304,9 @@ describe('useAuthStore', () => {
       { accessToken: 'access-2', refreshToken: 'refresh-2' },
       'refresh-1'
     );
-    await secondRotation;
 
     rejectOldWrite(new Error('stale write failed late'));
-    await firstRotation;
+    await Promise.all([firstRotation, secondRotation]);
 
     expect(secureStore.setItemAsync).toHaveBeenNthCalledWith(
       1,
@@ -324,6 +323,102 @@ describe('useAuthStore', () => {
       accessToken: 'access-2',
       refreshToken: 'refresh-2',
       sessionRevision: 7
+    });
+  });
+
+  it('serializes refresh writes so a stale success cannot overwrite the newer token', async () => {
+    useAuthStore.setState({
+      accessToken: 'access-0',
+      refreshToken: 'refresh-0',
+      isRestoring: false,
+      sessionRevision: 7
+    });
+    let persistedRefreshToken: string | null = 'refresh-0';
+    let releaseFirstWrite!: () => void;
+    const firstWriteGate = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    secureStore.setItemAsync.mockImplementation(async (_key, refreshToken: string) => {
+      if (refreshToken === 'refresh-1') {
+        await firstWriteGate;
+      }
+      persistedRefreshToken = refreshToken;
+    });
+
+    const firstRotation = useAuthStore.getState().acceptRefreshedTokens(
+      { accessToken: 'access-1', refreshToken: 'refresh-1' },
+      'refresh-0'
+    );
+    const secondRotation = useAuthStore.getState().acceptRefreshedTokens(
+      { accessToken: 'access-2', refreshToken: 'refresh-2' },
+      'refresh-1'
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(useAuthStore.getState().refreshToken).toBe('refresh-2');
+      });
+      expect(secureStore.setItemAsync).toHaveBeenCalledTimes(1);
+      expect(persistedRefreshToken).toBe('refresh-0');
+    } finally {
+      releaseFirstWrite();
+      await Promise.all([firstRotation, secondRotation]);
+    }
+
+    expect(secureStore.setItemAsync).toHaveBeenCalledTimes(2);
+    expect(persistedRefreshToken).toBe('refresh-2');
+  });
+
+  it('queues logout deletion after a pending refresh write so disk ends empty', async () => {
+    useAuthStore.setState({
+      accessToken: 'access-0',
+      refreshToken: 'refresh-0',
+      isRestoring: false,
+      sessionRevision: 3
+    });
+    vi.spyOn(authApi, 'logout').mockResolvedValue(undefined);
+    let persistedRefreshToken: string | null = 'refresh-0';
+    let releaseRefreshWrite!: () => void;
+    const refreshWriteGate = new Promise<void>((resolve) => {
+      releaseRefreshWrite = resolve;
+    });
+    secureStore.setItemAsync.mockImplementation(async (_key, refreshToken: string) => {
+      await refreshWriteGate;
+      persistedRefreshToken = refreshToken;
+    });
+    secureStore.deleteItemAsync.mockImplementation(async () => {
+      persistedRefreshToken = null;
+    });
+
+    const rotation = useAuthStore.getState().acceptRefreshedTokens(
+      { accessToken: 'access-1', refreshToken: 'refresh-1' },
+      'refresh-0'
+    );
+    const logout = useAuthStore.getState().logout();
+
+    try {
+      await vi.waitFor(() => expect(authApi.logout).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: 'access-1',
+        refreshToken: 'refresh-1',
+        isTerminating: true,
+        sessionRevision: 3
+      });
+    } finally {
+      releaseRefreshWrite();
+      await Promise.all([rotation, logout]);
+    }
+
+    expect(secureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledTimes(1);
+    expect(persistedRefreshToken).toBeNull();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      isTerminating: false,
+      sessionRevision: 4
     });
   });
 
@@ -410,7 +505,7 @@ describe('useAuthStore', () => {
 
     await expect(useAuthStore.getState().logout()).resolves.toBeUndefined();
 
-    expect(authApi.logout).toHaveBeenCalledWith('session-refresh');
+    expect(authApi.logout).toHaveBeenCalledWith('session-refresh', expect.anything());
     expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
@@ -430,12 +525,82 @@ describe('useAuthStore', () => {
 
     await expect(useAuthStore.getState().logout()).resolves.toBeUndefined();
 
-    expect(authApi.logout).toHaveBeenCalledWith('session-refresh');
+    expect(authApi.logout).toHaveBeenCalledWith('session-refresh', expect.anything());
     expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
       refreshToken: null,
       isRestoring: false
     });
+  });
+
+  it('aborts a hung logout revocation and continues cleanup after five seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      useAuthStore.setState({
+        accessToken: 'session-access',
+        refreshToken: 'session-refresh',
+        isRestoring: false,
+        sessionRevision: 6,
+        isTerminating: false
+      });
+      let logoutSignal: AbortSignal | undefined;
+      let rejectLateRevocation!: (error: Error) => void;
+      const lateRevocation = new Promise<void>((_resolve, reject) => {
+        rejectLateRevocation = reject;
+      });
+      vi.spyOn(authApi, 'logout').mockImplementation(
+        async (_refreshToken, signal?: AbortSignal) => {
+          logoutSignal = signal;
+          await lateRevocation;
+        }
+      );
+      const retireSpy = vi
+        .spyOn(activeUserScopeCoordinator, 'retire')
+        .mockResolvedValue(undefined);
+      let settled = false;
+
+      const logout = useAuthStore.getState().logout();
+      void logout.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(authApi.logout).toHaveBeenCalledWith(
+        'session-refresh',
+        expect.anything()
+      );
+      expect(settled).toBe(false);
+      expect(retireSpy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(settled).toBe(false);
+      expect(retireSpy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(logoutSignal?.aborted).toBe(true);
+      expect(retireSpy).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(true);
+      await logout;
+      expect(secureStore.deleteItemAsync).toHaveBeenCalledWith(
+        'easyMeditation.refreshToken'
+      );
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: null,
+        refreshToken: null,
+        isTerminating: false,
+        sessionRevision: 7
+      });
+      rejectLateRevocation(new Error('aborted revoke rejected late'));
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

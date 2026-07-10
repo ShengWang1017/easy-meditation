@@ -11,6 +11,7 @@ import { ApiRequestError } from '../api/client';
 import { activeUserScopeCoordinator } from '../query/client';
 
 export const REFRESH_TOKEN_KEY = 'easyMeditation.refreshToken';
+export const AUTH_LOGOUT_TIMEOUT_MS = 5_000;
 
 export type AuthTerminationState = {
   isTerminating: boolean;
@@ -34,6 +35,7 @@ type AuthState = AuthTerminationState & {
 
 let restorePromise: Promise<void> | null = null;
 let cleanupTail: Promise<void> = Promise.resolve();
+let secureStoreMutationTail: Promise<void> = Promise.resolve();
 let terminalClearScheduled = false;
 let tokenPersistenceGeneration = 0;
 
@@ -45,10 +47,33 @@ function isInvalidRefreshTokenError(error: unknown): error is ApiRequestError {
   );
 }
 
+function enqueueSecureStoreMutation(
+  operation: () => Promise<void>
+): Promise<void> {
+  const result = secureStoreMutationTail.then(operation);
+  secureStoreMutationTail = result.catch(() => undefined);
+  return result;
+}
+
+function queueStoredRefreshTokenWrite(refreshToken: string): {
+  generation: number;
+  result: Promise<void>;
+} {
+  const generation = ++tokenPersistenceGeneration;
+  return {
+    generation,
+    result: enqueueSecureStoreMutation(() =>
+      SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken)
+    )
+  };
+}
+
 async function deleteStoredRefreshToken(): Promise<void> {
   tokenPersistenceGeneration += 1;
   try {
-    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+    await enqueueSecureStoreMutation(() =>
+      SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY)
+    );
   } catch {
     // Local session cleanup must still finish if secure storage is unavailable.
   }
@@ -58,6 +83,25 @@ function enqueueCleanup(operation: () => Promise<void>): Promise<void> {
   const result = cleanupTail.then(operation);
   cleanupTail = result.catch(() => undefined);
   return result;
+}
+
+async function revokeRefreshTokenBestEffort(refreshToken: string): Promise<void> {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const revocation = Promise.resolve()
+    .then(() => authApi.logout(refreshToken, controller.signal))
+    .catch(() => undefined);
+  const timeout = new Promise<void>((resolve) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      resolve();
+    }, AUTH_LOGOUT_TIMEOUT_MS);
+  });
+
+  await Promise.race([revocation, timeout]);
+  if (timeoutId !== undefined) {
+    clearTimeout(timeoutId);
+  }
 }
 
 export const useAuthStore = create<AuthState>((set, get) => {
@@ -86,8 +130,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     isTerminating: false,
     async login(input) {
       const tokens = await authApi.login(input);
-      tokenPersistenceGeneration += 1;
-      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
+      await queueStoredRefreshTokenWrite(tokens.refreshToken).result;
       set((state) => ({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -100,8 +143,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     },
     async register(input) {
       const result = await authApi.register(input);
-      tokenPersistenceGeneration += 1;
-      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, result.tokens.refreshToken);
+      await queueStoredRefreshTokenWrite(result.tokens.refreshToken).result;
       set((state) => ({
         accessToken: result.tokens.accessToken,
         refreshToken: result.tokens.refreshToken,
@@ -122,11 +164,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
         const pendingRestoreTokens = get().pendingRestoreTokens;
         if (pendingRestoreTokens) {
           try {
-            tokenPersistenceGeneration += 1;
-            await SecureStore.setItemAsync(
-              REFRESH_TOKEN_KEY,
+            await queueStoredRefreshTokenWrite(
               pendingRestoreTokens.refreshToken
-            );
+            ).result;
           } catch (error) {
             set({
               accessToken: null,
@@ -196,8 +236,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         }
 
         try {
-          tokenPersistenceGeneration += 1;
-          await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
+          await queueStoredRefreshTokenWrite(tokens.refreshToken).result;
         } catch (error) {
           set({
             accessToken: null,
@@ -230,11 +269,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       return enqueueCleanup(async () => {
         const refreshToken = get().refreshToken;
         if (refreshToken) {
-          try {
-            await authApi.logout(refreshToken);
-          } catch {
-            // Revocation is best effort; retirement and local deletion are mandatory.
-          }
+          await revokeRefreshTokenBestEffort(refreshToken);
         }
         await finishLocalSessionCleanup();
       });
@@ -278,13 +313,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
         pendingRestoreTokens: null
       });
 
-      const persistenceGeneration = ++tokenPersistenceGeneration;
+      const persistence = queueStoredRefreshTokenWrite(tokens.refreshToken);
       try {
-        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
+        await persistence.result;
       } catch {
         const latest = get();
         if (
-          persistenceGeneration === tokenPersistenceGeneration &&
+          persistence.generation === tokenPersistenceGeneration &&
           latest.refreshToken === tokens.refreshToken
         ) {
           await deleteStoredRefreshToken();

@@ -31,11 +31,15 @@ export async function refresh(refreshToken: string): Promise<TokenPair> {
   });
 }
 
-export async function logout(refreshToken: string): Promise<void> {
+export async function logout(
+  refreshToken: string,
+  signal?: AbortSignal
+): Promise<void> {
   await apiRequest<{ ok: true }>('/auth/logout', {
     method: 'POST',
     skipAuth: true,
-    body: JSON.stringify({ refreshToken })
+    body: JSON.stringify({ refreshToken }),
+    signal
   });
 }
 

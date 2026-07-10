@@ -28,6 +28,12 @@ type ApiRequestErrorOptions = {
   fields?: Record<string, string>;
 };
 
+type AuthSessionSnapshot = {
+  sessionRevision: number;
+  accessToken: string | null;
+  refreshToken: string | null;
+};
+
 const GENERIC_REQUEST_ERROR_MESSAGE = '请求失败，请稍后再试。';
 
 const inFlightRefreshes = new Map<string, Promise<TokenPair>>();
@@ -126,7 +132,31 @@ function getCurrentTokenPair(): TokenPair | null {
   return { accessToken, refreshToken };
 }
 
-async function runRefreshTokenPair(refreshToken: string): Promise<TokenPair> {
+function getAuthSessionSnapshot(): AuthSessionSnapshot {
+  const { sessionRevision, accessToken, refreshToken } = useAuthStore.getState();
+  return { sessionRevision, accessToken, refreshToken };
+}
+
+function isSessionRevisionCurrent(sessionRevision: number): boolean {
+  const current = useAuthStore.getState();
+  return (
+    current.sessionRevision === sessionRevision &&
+    !current.isTerminating
+  );
+}
+
+function sessionChangedError(): ApiRequestError {
+  return new ApiRequestError({
+    status: 401,
+    code: 'SESSION_CHANGED',
+    message: 'The authenticated session changed while the request was in flight.'
+  });
+}
+
+async function runRefreshTokenPair(
+  refreshToken: string,
+  expectedSessionRevision: number
+): Promise<TokenPair> {
   const response = await fetch(`${resolveApiBaseUrl()}/auth/refresh`, {
     method: 'POST',
     headers: buildHeaders({ skipAuth: true }, null),
@@ -134,6 +164,10 @@ async function runRefreshTokenPair(refreshToken: string): Promise<TokenPair> {
   });
   const body = (await response.json()) as ApiEnvelope<TokenPair>;
   const error = toApiRequestError(response, body);
+
+  if (!isSessionRevisionCurrent(expectedSessionRevision)) {
+    throw sessionChangedError();
+  }
 
   if (error) {
     if (error.status === 401 && error.code === 'INVALID_REFRESH_TOKEN') {
@@ -171,19 +205,26 @@ async function runRefreshTokenPair(refreshToken: string): Promise<TokenPair> {
   });
 }
 
-async function refreshTokenPair(refreshToken: string): Promise<TokenPair> {
-  const inFlightRefresh = inFlightRefreshes.get(refreshToken);
+async function refreshTokenPair(
+  refreshToken: string,
+  expectedSessionRevision: number
+): Promise<TokenPair> {
+  const refreshKey = `${expectedSessionRevision}\u0000${refreshToken}`;
+  const inFlightRefresh = inFlightRefreshes.get(refreshKey);
   if (inFlightRefresh) {
     return inFlightRefresh;
   }
 
-  const refreshPromise = runRefreshTokenPair(refreshToken).finally(() => {
-    if (inFlightRefreshes.get(refreshToken) === refreshPromise) {
-      inFlightRefreshes.delete(refreshToken);
+  const refreshPromise = runRefreshTokenPair(
+    refreshToken,
+    expectedSessionRevision
+  ).finally(() => {
+    if (inFlightRefreshes.get(refreshKey) === refreshPromise) {
+      inFlightRefreshes.delete(refreshKey);
     }
   });
 
-  inFlightRefreshes.set(refreshToken, refreshPromise);
+  inFlightRefreshes.set(refreshKey, refreshPromise);
   return refreshPromise;
 }
 
@@ -191,15 +232,39 @@ export async function apiRequest<T>(
   path: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const first = await sendApiRequest<T>(path, options, useAuthStore.getState().accessToken);
+  const initialSession = getAuthSessionSnapshot();
+  const first = await sendApiRequest<T>(path, options, initialSession.accessToken);
   const firstError = toApiRequestError(first.response, first.body);
 
+  if (
+    !options.skipAuth &&
+    !isSessionRevisionCurrent(initialSession.sessionRevision)
+  ) {
+    if (firstError) {
+      throw firstError;
+    }
+    throw sessionChangedError();
+  }
+
   if (firstError?.status === 401 && !options.skipAuth) {
-    const refreshToken = useAuthStore.getState().refreshToken;
+    const refreshToken = initialSession.refreshToken;
     if (refreshToken) {
-      const tokens = await refreshTokenPair(refreshToken);
+      const tokens = await refreshTokenPair(
+        refreshToken,
+        initialSession.sessionRevision
+      );
+      if (!isSessionRevisionCurrent(initialSession.sessionRevision)) {
+        throw sessionChangedError();
+      }
       const retry = await sendApiRequest<T>(path, options, tokens.accessToken);
       const retryError = toApiRequestError(retry.response, retry.body);
+
+      if (!isSessionRevisionCurrent(initialSession.sessionRevision)) {
+        if (retryError) {
+          throw retryError;
+        }
+        throw sessionChangedError();
+      }
 
       if (retryError) {
         if (retryError.status === 401) {

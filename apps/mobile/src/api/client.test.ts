@@ -32,6 +32,16 @@ vi.mock('react-native', () => ({
 import { useAuthStore } from '../store/authStore';
 import { apiRequest, resolveApiBaseUrl } from './client';
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('apiRequest', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -47,6 +57,7 @@ describe('apiRequest', () => {
       refreshToken: null,
       isRestoring: false,
       restoreError: null,
+      pendingRestoreTokens: null,
       sessionRevision: 0,
       isTerminating: false
     });
@@ -320,6 +331,202 @@ describe('apiRequest', () => {
       isTerminating: false
     });
     vi.useRealTimers();
+  });
+
+  it('does not refresh or replay an A request whose first 401 arrives after B signs in', async () => {
+    useAuthStore.setState({
+      accessToken: 'access-a',
+      refreshToken: 'refresh-a',
+      sessionRevision: 4,
+      isTerminating: false
+    });
+    const firstResponse = deferred<{
+      ok: boolean;
+      status: number;
+      json(): Promise<{
+        data: null;
+        error: { code: string; message: string };
+      }>;
+    }>();
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockRejectedValue(new Error('must not fetch across sessions'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = apiRequest('/practice-sessions', {
+      method: 'POST',
+      body: JSON.stringify({ owner: 'A' })
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    useAuthStore.setState({
+      accessToken: 'access-b',
+      refreshToken: 'refresh-b',
+      sessionRevision: 5,
+      isTerminating: false
+    });
+    firstResponse.resolve({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        data: null,
+        error: { code: 'UNAUTHORIZED', message: 'A expired.' }
+      })
+    });
+
+    await expect(request).rejects.toMatchObject({
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'A expired.'
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'access-b',
+      refreshToken: 'refresh-b',
+      sessionRevision: 5,
+      isTerminating: false
+    });
+  });
+
+  it('does not terminal-clear B when A retry returns 401 after the session changes', async () => {
+    vi.useFakeTimers();
+    try {
+      useAuthStore.setState({
+        accessToken: 'expired-a',
+        refreshToken: 'refresh-a',
+        sessionRevision: 8,
+        isTerminating: false
+      });
+      const retryResponse = deferred<{
+        ok: boolean;
+        status: number;
+        json(): Promise<{
+          data: null;
+          error: { code: string; message: string };
+        }>;
+      }>();
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: async () => ({
+            data: null,
+            error: { code: 'UNAUTHORIZED', message: 'A expired.' }
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: { accessToken: 'fresh-a', refreshToken: 'rotated-a' },
+            error: null
+          })
+        })
+        .mockReturnValueOnce(retryResponse.promise);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const request = apiRequest('/practice-sessions', {
+        method: 'POST',
+        body: JSON.stringify({ owner: 'A' })
+      });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+      useAuthStore.setState({
+        accessToken: 'access-b',
+        refreshToken: 'refresh-b',
+        sessionRevision: 9,
+        isTerminating: false
+      });
+      retryResponse.resolve({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          data: null,
+          error: { code: 'UNAUTHORIZED', message: 'A retry rejected.' }
+        })
+      });
+
+      await expect(request).rejects.toMatchObject({
+        status: 401,
+        code: 'UNAUTHORIZED',
+        message: 'A retry rejected.'
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: 'access-b',
+        refreshToken: 'refresh-b',
+        sessionRevision: 9,
+        isTerminating: false
+      });
+    } finally {
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not return B as a stale-token fallback when A refresh fails after revision change', async () => {
+    useAuthStore.setState({
+      accessToken: 'expired-a',
+      refreshToken: 'refresh-a',
+      sessionRevision: 12,
+      isTerminating: false
+    });
+    const refreshResponse = deferred<{
+      ok: boolean;
+      status: number;
+      json(): Promise<{
+        data: null;
+        error: { code: string; message: string };
+      }>;
+    }>();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          data: null,
+          error: { code: 'UNAUTHORIZED', message: 'A expired.' }
+        })
+      })
+      .mockReturnValueOnce(refreshResponse.promise)
+      .mockRejectedValue(new Error('must not retry A with B tokens'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = apiRequest('/me');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    useAuthStore.setState({
+      accessToken: 'access-b',
+      refreshToken: 'refresh-b',
+      sessionRevision: 13,
+      isTerminating: false
+    });
+    refreshResponse.resolve({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        data: null,
+        error: {
+          code: 'INVALID_REFRESH_TOKEN',
+          message: 'A refresh is stale.'
+        }
+      })
+    });
+
+    await expect(request).rejects.toMatchObject({
+      status: 401,
+      code: 'SESSION_CHANGED'
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'access-b',
+      refreshToken: 'refresh-b',
+      sessionRevision: 13,
+      isTerminating: false
+    });
   });
 
   it('shares a single refresh rotation across concurrent authenticated 401s', async () => {
