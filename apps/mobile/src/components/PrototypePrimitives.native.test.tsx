@@ -174,7 +174,12 @@ describe('PrototypeScreen', () => {
   it('uses the compact gutter at 380 points and can scroll with keyboard avoidance', () => {
     mockWindowWidth = 380;
     const view = render(
-      <PrototypeScreen keyboardAvoiding scrollable testID="scroll-screen">
+      <PrototypeScreen
+        keyboardAvoiding
+        nestedScrollEnabled
+        scrollable
+        testID="scroll-screen"
+      >
         <AppText>Scrollable</AppText>
       </PrototypeScreen>
     );
@@ -182,6 +187,7 @@ describe('PrototypeScreen', () => {
     expect(view.UNSAFE_getByType(ScrollView).props.contentContainerStyle).toEqual(
       expect.arrayContaining([expect.objectContaining({ flexGrow: 1 })])
     );
+    expect(view.UNSAFE_getByType(ScrollView).props.nestedScrollEnabled).toBe(true);
     expect(view.UNSAFE_getByType(KeyboardAvoidingView)).toBeTruthy();
     expect(StyleSheet.flatten(view.getByTestId('scroll-screen-content').props.style)).toMatchObject({
       maxWidth: 420,

@@ -110,6 +110,54 @@ function createRejectOnceStorage() {
   return { setItem, storage, writes };
 }
 
+function createDeferredFirstWriteStorage({
+  rejectAttempts = []
+}: { rejectAttempts?: number[] } = {}) {
+  const values = new Map<string, string>();
+  const writes: string[] = [];
+  let attempt = 0;
+  let markFirstWriteStarted: () => void = () => undefined;
+  let resolveFirstWrite: () => void = () => undefined;
+  let rejectFirstWrite: (reason?: unknown) => void = () => undefined;
+  const firstWriteStarted = new Promise<void>((resolve) => {
+    markFirstWriteStarted = resolve;
+  });
+  const firstWrite = new Promise<void>((resolve, reject) => {
+    resolveFirstWrite = resolve;
+    rejectFirstWrite = reject;
+  });
+  const setItem = jest.fn(async (name: string, value: string) => {
+    attempt += 1;
+    writes.push(value);
+    if (attempt === 1) {
+      markFirstWriteStarted();
+      await firstWrite;
+    }
+    if (rejectAttempts.includes(attempt)) {
+      throw new Error(`preference write ${attempt} failed`);
+    }
+    values.set(name, value);
+  });
+  const storage: StateStorage = {
+    async getItem(name) {
+      return values.get(name) ?? null;
+    },
+    setItem,
+    async removeItem(name) {
+      values.delete(name);
+    }
+  };
+
+  return {
+    firstWriteStarted,
+    rejectFirstWrite,
+    resolveFirstWrite,
+    setItem,
+    storage,
+    writes
+  };
+}
+
 function persistedInhaleSeconds(value: string): number {
   return JSON.parse(value).state.customRhythm.inhaleSeconds as number;
 }
@@ -176,14 +224,22 @@ describe('CustomRhythmScreen', () => {
     expect(view.queryByRole('button', { name: /保存/ })).toBeNull();
     expect(view.UNSAFE_getByType(PrototypeScreen).props).toMatchObject({
       backgroundVariant: 'custom',
+      nestedScrollEnabled: true,
       scrollable: true
     });
+    expect(
+      view.UNSAFE_getAllByType(FlatList).every(
+        (list) => list.props.nestedScrollEnabled === true
+      )
+    ).toBe(true);
 
     fireEvent.press(view.getByRole('button', { name: '开始呼吸' }));
-    expect(mockRouter.push).toHaveBeenCalledWith({
-      pathname: '/session/[methodId]',
-      params: { methodId: 'custom' }
-    });
+    await waitFor(() =>
+      expect(mockRouter.push).toHaveBeenCalledWith({
+        pathname: '/session/[methodId]',
+        params: { methodId: 'custom' }
+      })
+    );
   });
 
   it('commits wheel values immediately and redistributes 11 seconds to 5/3/6 at 14', async () => {
@@ -239,14 +295,16 @@ describe('CustomRhythmScreen', () => {
       expect(view.store.getState().customRhythm.exhaleSeconds).toBe(6)
     );
     fireEvent.press(view.getByRole('button', { name: '返回呼吸训练首页' }));
-    expect(mockRouter.back).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockRouter.back).toHaveBeenCalledTimes(1));
     expect(view.store.getState().customRhythm.exhaleSeconds).toBe(6);
 
     mockHasBackEntry = false;
     mockRouter.back.mockClear();
     fireEvent.press(view.getByRole('button', { name: '返回呼吸训练首页' }));
+    await waitFor(() =>
+      expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/practice')
+    );
     expect(mockRouter.back).not.toHaveBeenCalled();
-    expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/practice');
     expect(view.store.getState().customRhythm.exhaleSeconds).toBe(6);
   });
 
@@ -296,6 +354,100 @@ describe('CustomRhythmScreen', () => {
       view.getByRole('adjustable', { name: '设置吸气秒数' }).props
         .accessibilityValue
     ).toMatchObject({ now: 6 });
+  });
+
+  it('keeps the durable custom queue across an unmount and remount', async () => {
+    const controlledStorage = createDeferredFirstWriteStorage();
+    const store = createUserPreferencesStore(
+      'custom-cross-remount-user',
+      controlledStorage.storage
+    );
+    const firstView = await renderCustom(store);
+
+    fireEvent(firstView.getByTestId('custom-inhale-wheel-list'), 'momentumScrollEnd', {
+      nativeEvent: { contentOffset: { x: 0, y: 4 * 56 } }
+    });
+    await controlledStorage.firstWriteStarted;
+    firstView.unmount();
+
+    const secondView = renderWithProviders(
+      <PreferencesStoreProvider store={store}>
+        <CustomRhythmScreen />
+      </PreferencesStoreProvider>
+    );
+    fireEvent(secondView.getByTestId('custom-inhale-wheel-list'), 'momentumScrollEnd', {
+      nativeEvent: { contentOffset: { x: 0, y: 5 * 56 } }
+    });
+    controlledStorage.rejectFirstWrite(new Error('first write failed'));
+
+    await waitFor(() => expect(controlledStorage.setItem).toHaveBeenCalledTimes(3));
+    expect(controlledStorage.writes.map(persistedInhaleSeconds)).toEqual([5, 4, 6]);
+    expect(store.getState().customRhythm.inhaleSeconds).toBe(6);
+    expect(
+      secondView.getByRole('adjustable', { name: '设置吸气秒数' }).props
+        .accessibilityValue
+    ).toMatchObject({ now: 6 });
+  });
+
+  it.each([
+    { action: '开始呼吸', expected: 'push' as const },
+    { action: '返回呼吸训练首页', expected: 'back' as const }
+  ])('waits for a pending durable save before $action navigation', async ({ action, expected }) => {
+    const controlledStorage = createDeferredFirstWriteStorage();
+    const store = createUserPreferencesStore(
+      `custom-pending-${expected}-user`,
+      controlledStorage.storage
+    );
+    const view = await renderCustom(store);
+
+    fireEvent(
+      view.getByRole('adjustable', { name: '设置吸气秒数' }),
+      'accessibilityAction',
+      { nativeEvent: { actionName: 'increment' } }
+    );
+    await controlledStorage.firstWriteStarted;
+    fireEvent.press(view.getByRole('button', { name: action }));
+
+    expect(mockRouter[expected]).not.toHaveBeenCalled();
+    controlledStorage.resolveFirstWrite();
+    await waitFor(() => expect(mockRouter[expected]).toHaveBeenCalledTimes(1));
+  });
+
+  it('blocks navigation, surfaces rollback failure, and retries the intended value', async () => {
+    const controlledStorage = createDeferredFirstWriteStorage({
+      rejectAttempts: [2]
+    });
+    const store = createUserPreferencesStore(
+      'custom-retry-save-user',
+      controlledStorage.storage
+    );
+    const view = await renderCustom(store);
+
+    fireEvent(
+      view.getByRole('adjustable', { name: '设置吸气秒数' }),
+      'accessibilityAction',
+      { nativeEvent: { actionName: 'increment' } }
+    );
+    await controlledStorage.firstWriteStarted;
+    fireEvent.press(view.getByRole('button', { name: '开始呼吸' }));
+    controlledStorage.rejectFirstWrite(new Error('first write failed'));
+
+    await waitFor(() =>
+      expect(view.getByRole('alert', { name: '设置未保存，请重试。' })).toBeTruthy()
+    );
+    expect(controlledStorage.setItem).toHaveBeenCalledTimes(2);
+    expect(store.getState().customRhythm.inhaleSeconds).toBe(4);
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    fireEvent.press(view.getByRole('button', { name: '重试保存' }));
+    await waitFor(() =>
+      expect(view.queryByRole('alert', { name: '设置未保存，请重试。' })).toBeNull()
+    );
+    expect(controlledStorage.setItem).toHaveBeenCalledTimes(3);
+    expect(store.getState().customRhythm.inhaleSeconds).toBe(5);
+
+    fireEvent.press(view.getByRole('button', { name: '开始呼吸' }));
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(1));
   });
 
   it('matches the source wide and compact custom geometry and back asset', async () => {

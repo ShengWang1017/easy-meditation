@@ -50,6 +50,7 @@ describe('ScrollWheelPicker', () => {
     expect(list.props).toMatchObject({
       decelerationRate: 'fast',
       initialScrollIndex: 1,
+      nestedScrollEnabled: true,
       showsVerticalScrollIndicator: false,
       snapToAlignment: 'start',
       snapToInterval: 56
@@ -113,6 +114,39 @@ describe('ScrollWheelPicker', () => {
     expect(onValueChange).toHaveBeenCalledTimes(1);
   });
 
+  it('commits a slow drag without momentum and deduplicates a later matching momentum event', async () => {
+    const onValueChange = jest.fn(async (_value: number) => undefined);
+    const view = render(
+      <ScrollWheelPicker
+        accessibilityLabel="设置阶段"
+        onValueChange={onValueChange}
+        testID="drag-wheel"
+        value={1}
+        values={[1, 4, 7, 10]}
+        variant="phase"
+      />
+    );
+    const list = view.getByTestId('drag-wheel-list');
+
+    fireEvent(list, 'scrollBeginDrag', {
+      nativeEvent: { contentOffset: { x: 0, y: 0 } }
+    });
+    fireEvent(list, 'scrollEndDrag', {
+      nativeEvent: {
+        contentOffset: { x: 0, y: 106 },
+        velocity: { x: 0, y: 0 }
+      }
+    });
+    await waitFor(() => expect(onValueChange).toHaveBeenCalledWith(7));
+
+    fireEvent(list, 'momentumScrollEnd', {
+      nativeEvent: { contentOffset: { x: 0, y: 106 } }
+    });
+
+    await Promise.resolve();
+    expect(onValueChange).toHaveBeenCalledTimes(1);
+  });
+
   it('supports accessible increment and decrement without crossing boundaries', async () => {
     const onValueChange = jest.fn(async (_value: number) => undefined);
     const view = render(
@@ -130,7 +164,14 @@ describe('ScrollWheelPicker', () => {
     const list = view.UNSAFE_getByType(FlatList);
 
     expect(list.props.snapToInterval).toBe(34);
+    expect(list.props.hitSlop).toEqual({
+      top: 5,
+      right: 0,
+      bottom: 5,
+      left: 0
+    });
     expect(StyleSheet.flatten(list.props.style).height).toBe(34);
+    expect(StyleSheet.flatten(wheel.props.style).height).toBe(44);
     fireEvent(wheel, 'accessibilityAction', {
       nativeEvent: { actionName: 'increment' }
     });

@@ -40,6 +40,8 @@ export const DEFAULT_PREFERENCES = {
   localSessionLedger: []
 } as const;
 
+export const CUSTOM_RHYTHM_SAVE_ERROR = '设置未保存，请重试。';
+
 type CustomPhase = 'inhaleSeconds' | 'holdSeconds' | 'exhaleSeconds';
 
 export type LedgerEntryUpdater = (
@@ -48,6 +50,7 @@ export type LedgerEntryUpdater = (
 
 export type UserPreferencesState = {
   customRhythm: CustomRhythm;
+  customRhythmSaveError: string | null;
   durationOverrides: DurationOverrides;
   soundEnabled: boolean;
   beforeStartDismissed: boolean;
@@ -55,6 +58,8 @@ export type UserPreferencesState = {
   setCustomPhase(phase: CustomPhase, seconds: number): Promise<void>;
   setCustomCycleSeconds(seconds: number): Promise<void>;
   setCustomDuration(durationMinutes: CustomDurationMinutes): Promise<void>;
+  waitForCustomRhythmSave(): Promise<void>;
+  retryCustomRhythmSave(): Promise<void>;
   setDurationOverride(
     methodId: BuiltInMethodId | 'custom',
     durationMinutes: number
@@ -186,127 +191,218 @@ export function createUserPreferencesStore(
   const barrier = createAwaitableStateStorage(storage);
   let dismissTail: Promise<void> = Promise.resolve();
   let hydrationError: unknown;
+  let syncHydratedCustomRhythm: ((rhythm: CustomRhythm) => void) | undefined;
 
   const store = createStore<UserPreferencesState>()(
     persist<UserPreferencesState, [], [], PersistedPreferences>(
-      (set, get) => ({
-        ...defaults,
-        async setCustomPhase(phase, seconds) {
-          const validPhase = customPhaseSchema.parse(phase);
-          const validSeconds = phaseSecondsSchema.parse(seconds);
-          set((state) => ({
-            customRhythm: {
-              ...state.customRhythm,
-              [validPhase]: validSeconds
-            }
-          }));
-          await barrier.flush();
-        },
-        async setCustomCycleSeconds(seconds) {
-          const validSeconds = cycleSecondsSchema.parse(seconds);
-          set((state) => ({
-            customRhythm: {
-              ...state.customRhythm,
-              ...redistributeCycleSeconds(state.customRhythm, validSeconds)
-            }
-          }));
-          await barrier.flush();
-        },
-        async setCustomDuration(durationMinutes) {
-          const validDuration = customDurationMinutesSchema.parse(durationMinutes);
-          set((state) => ({
-            customRhythm: {
-              ...state.customRhythm,
-              durationMinutes: validDuration
-            }
-          }));
-          await barrier.flush();
-        },
-        async setDurationOverride(methodId, durationMinutes) {
-          const validMethodId = builtInMethodIdSchema.parse(methodId);
-          const validOverrides = durationOverridesSchema.parse({
-            ...get().durationOverrides,
-            [validMethodId]: durationMinutes
-          });
-          set({ durationOverrides: validOverrides });
-          await barrier.flush();
-        },
-        async setSoundEnabled(enabled) {
-          const validEnabled = soundEnabledSchema.parse(enabled);
-          set({ soundEnabled: validEnabled });
-          await barrier.flush();
-        },
-        dismissBeforeStart() {
-          const dismissal = dismissTail.then(async () => {
-            const previousDismissed = get().beforeStartDismissed;
-            set({ beforeStartDismissed: true });
+      (set, get) => {
+        type CustomRhythmMutation = (current: CustomRhythm) => CustomRhythm;
+        let customRhythmTail: Promise<void> | null = null;
+        let lastPersistedCustomRhythm: CustomRhythm = {
+          ...defaults.customRhythm
+        };
+        let latestMutationId = 0;
+        let retryMutation: CustomRhythmMutation | null = null;
+        let lastCustomRhythmFailure: unknown;
+
+        syncHydratedCustomRhythm = (rhythm) => {
+          lastPersistedCustomRhythm = { ...rhythm };
+          retryMutation = null;
+          lastCustomRhythmFailure = undefined;
+        };
+
+        function enqueueCustomRhythmMutation(
+          mutation: CustomRhythmMutation
+        ): Promise<void> {
+          const mutationId = ++latestMutationId;
+          retryMutation = null;
+          const runCommit = async () => {
+            const previous = { ...lastPersistedCustomRhythm };
+            const next = mutation(previous);
+            set({ customRhythm: next, customRhythmSaveError: null });
+
             try {
               await barrier.flush();
-            } catch (error) {
-              set({ beforeStartDismissed: previousDismissed });
+              lastPersistedCustomRhythm = { ...next };
+              lastCustomRhythmFailure = undefined;
+            } catch (writeError) {
+              const isLatestMutation = mutationId === latestMutationId;
+              if (isLatestMutation) {
+                retryMutation = mutation;
+                lastCustomRhythmFailure = writeError;
+              }
+              set({
+                customRhythm: previous,
+                customRhythmSaveError: isLatestMutation
+                  ? CUSTOM_RHYTHM_SAVE_ERROR
+                  : null
+              });
               try {
                 await barrier.flush();
-              } catch {
-                // The failed dismissal did not replace the previously persisted value.
+              } catch (rollbackError) {
+                if (isLatestMutation) {
+                  lastCustomRhythmFailure = rollbackError;
+                }
               }
-              throw error;
+              throw writeError;
+            }
+          };
+          const commit = customRhythmTail
+            ? customRhythmTail.then(runCommit)
+            : runCommit();
+          const settledCommit = commit.catch(() => undefined);
+          customRhythmTail = settledCommit;
+          void settledCommit.then(() => {
+            if (customRhythmTail === settledCommit) {
+              customRhythmTail = null;
             }
           });
-          dismissTail = dismissal.catch(() => undefined);
-          return dismissal;
-        },
-        async putLedgerEntry(entry) {
-          const validEntry = cloneLedgerEntry(localSessionLedgerEntrySchema.parse(entry));
-          set((state) => {
-            const existingIndex = state.localSessionLedger.findIndex(
-              (candidate) => candidate.clientSessionId === validEntry.clientSessionId
-            );
-            if (existingIndex === -1) {
-              return {
-                localSessionLedger: [...state.localSessionLedger, validEntry]
-              };
-            }
-
-            const localSessionLedger = [...state.localSessionLedger];
-            localSessionLedger[existingIndex] = validEntry;
-            return { localSessionLedger };
-          });
-          await barrier.flush();
-        },
-        async updateLedgerEntry(clientSessionId, updater) {
-          const validClientSessionId = clientSessionIdSchema.parse(clientSessionId);
-          const current = get().localSessionLedger.find(
-            (entry) => entry.clientSessionId === validClientSessionId
-          );
-          if (!current) {
-            throw new Error(`Ledger entry not found: ${validClientSessionId}`);
-          }
-
-          const updated = localSessionLedgerEntrySchema.parse(
-            updater(cloneLedgerEntry(current))
-          );
-          if (updated.clientSessionId !== validClientSessionId) {
-            throw new Error('A ledger update cannot change clientSessionId.');
-          }
-
-          const clonedUpdate = cloneLedgerEntry(updated);
-          set((state) => ({
-            localSessionLedger: state.localSessionLedger.map((entry) =>
-              entry.clientSessionId === validClientSessionId ? clonedUpdate : entry
-            )
-          }));
-          await barrier.flush();
-        },
-        async removeLedgerEntry(clientSessionId) {
-          const validClientSessionId = clientSessionIdSchema.parse(clientSessionId);
-          set((state) => ({
-            localSessionLedger: state.localSessionLedger.filter(
-              (entry) => entry.clientSessionId !== validClientSessionId
-            )
-          }));
-          await barrier.flush();
+          return commit;
         }
-      }),
+
+        async function waitForCustomRhythmSave() {
+          while (customRhythmTail) {
+            const observedTail = customRhythmTail;
+            await observedTail;
+          }
+
+          if (get().customRhythmSaveError) {
+            throw (
+              lastCustomRhythmFailure ??
+              new Error(CUSTOM_RHYTHM_SAVE_ERROR)
+            );
+          }
+        }
+
+        return {
+          ...defaults,
+          customRhythmSaveError: null,
+          async setCustomPhase(phase, seconds) {
+            const validPhase = customPhaseSchema.parse(phase);
+            const validSeconds = phaseSecondsSchema.parse(seconds);
+            await enqueueCustomRhythmMutation((current) => ({
+              ...current,
+              [validPhase]: validSeconds
+            }));
+          },
+          async setCustomCycleSeconds(seconds) {
+            const validSeconds = cycleSecondsSchema.parse(seconds);
+            await enqueueCustomRhythmMutation((current) => ({
+              ...current,
+              ...redistributeCycleSeconds(current, validSeconds)
+            }));
+          },
+          async setCustomDuration(durationMinutes) {
+            const validDuration = customDurationMinutesSchema.parse(durationMinutes);
+            await enqueueCustomRhythmMutation((current) => ({
+              ...current,
+              durationMinutes: validDuration
+            }));
+          },
+          waitForCustomRhythmSave,
+          async retryCustomRhythmSave() {
+            const mutation = retryMutation;
+            if (!mutation) {
+              await waitForCustomRhythmSave();
+              return;
+            }
+            await enqueueCustomRhythmMutation(mutation);
+          },
+          async setDurationOverride(methodId, durationMinutes) {
+            const validMethodId = builtInMethodIdSchema.parse(methodId);
+            const validOverrides = durationOverridesSchema.parse({
+              ...get().durationOverrides,
+              [validMethodId]: durationMinutes
+            });
+            set({ durationOverrides: validOverrides });
+            await barrier.flush();
+          },
+          async setSoundEnabled(enabled) {
+            const validEnabled = soundEnabledSchema.parse(enabled);
+            set({ soundEnabled: validEnabled });
+            await barrier.flush();
+          },
+          dismissBeforeStart() {
+            const dismissal = dismissTail.then(async () => {
+              const previousDismissed = get().beforeStartDismissed;
+              set({ beforeStartDismissed: true });
+              try {
+                await barrier.flush();
+              } catch (error) {
+                set({ beforeStartDismissed: previousDismissed });
+                try {
+                  await barrier.flush();
+                } catch {
+                  // The failed dismissal did not replace the previously persisted value.
+                }
+                throw error;
+              }
+            });
+            dismissTail = dismissal.catch(() => undefined);
+            return dismissal;
+          },
+          async putLedgerEntry(entry) {
+            const validEntry = cloneLedgerEntry(
+              localSessionLedgerEntrySchema.parse(entry)
+            );
+            set((state) => {
+              const existingIndex = state.localSessionLedger.findIndex(
+                (candidate) =>
+                  candidate.clientSessionId === validEntry.clientSessionId
+              );
+              if (existingIndex === -1) {
+                return {
+                  localSessionLedger: [...state.localSessionLedger, validEntry]
+                };
+              }
+
+              const localSessionLedger = [...state.localSessionLedger];
+              localSessionLedger[existingIndex] = validEntry;
+              return { localSessionLedger };
+            });
+            await barrier.flush();
+          },
+          async updateLedgerEntry(clientSessionId, updater) {
+            const validClientSessionId = clientSessionIdSchema.parse(
+              clientSessionId
+            );
+            const current = get().localSessionLedger.find(
+              (entry) => entry.clientSessionId === validClientSessionId
+            );
+            if (!current) {
+              throw new Error(`Ledger entry not found: ${validClientSessionId}`);
+            }
+
+            const updated = localSessionLedgerEntrySchema.parse(
+              updater(cloneLedgerEntry(current))
+            );
+            if (updated.clientSessionId !== validClientSessionId) {
+              throw new Error('A ledger update cannot change clientSessionId.');
+            }
+
+            const clonedUpdate = cloneLedgerEntry(updated);
+            set((state) => ({
+              localSessionLedger: state.localSessionLedger.map((entry) =>
+                entry.clientSessionId === validClientSessionId
+                  ? clonedUpdate
+                  : entry
+              )
+            }));
+            await barrier.flush();
+          },
+          async removeLedgerEntry(clientSessionId) {
+            const validClientSessionId = clientSessionIdSchema.parse(
+              clientSessionId
+            );
+            set((state) => ({
+              localSessionLedger: state.localSessionLedger.filter(
+                (entry) => entry.clientSessionId !== validClientSessionId
+              )
+            }));
+            await barrier.flush();
+          }
+        };
+      },
       {
         name: preferencesStorageKey(userId),
         storage: createJSONStorage(() => barrier.storage),
@@ -324,8 +420,11 @@ export function createUserPreferencesStore(
         }),
         onRehydrateStorage: () => {
           hydrationError = undefined;
-          return (_state, error) => {
+          return (state, error) => {
             hydrationError = error;
+            if (!error && state) {
+              syncHydratedCustomRhythm?.(state.customRhythm);
+            }
           };
         }
       }

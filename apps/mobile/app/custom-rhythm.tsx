@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useState } from 'react';
 import { router } from 'expo-router';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -7,11 +7,7 @@ import { PrototypeButton } from '../src/components/PrototypeButton';
 import { PrototypeIconButton } from '../src/components/PrototypeIconButton';
 import { PrototypeScreen } from '../src/components/PrototypeScreen';
 import { ScrollWheelPicker } from '../src/components/ScrollWheelPicker';
-import {
-  redistributeCycleSeconds,
-  type CustomDurationMinutes,
-  type CustomRhythm
-} from '../src/domain/customRhythm';
+import type { CustomDurationMinutes } from '../src/domain/customRhythm';
 import { usePreferencesStore } from '../src/store/PreferencesStoreProvider';
 import { referenceImages } from '../src/theme/assets';
 import { colors, shadows } from '../src/theme/tokens';
@@ -25,6 +21,9 @@ export default function CustomRhythmScreen() {
   const { width } = useWindowDimensions();
   const compact = width <= 380;
   const customRhythm = usePreferencesStore((state) => state.customRhythm);
+  const customRhythmSaveError = usePreferencesStore(
+    (state) => state.customRhythmSaveError
+  );
   const setCustomPhase = usePreferencesStore((state) => state.setCustomPhase);
   const setCustomCycleSeconds = usePreferencesStore(
     (state) => state.setCustomCycleSeconds
@@ -32,87 +31,76 @@ export default function CustomRhythmScreen() {
   const setCustomDuration = usePreferencesStore(
     (state) => state.setCustomDuration
   );
-  const persistedRhythm = useRef<CustomRhythm>({ ...customRhythm });
-  const commitTail = useRef<Promise<void>>(Promise.resolve());
+  const waitForCustomRhythmSave = usePreferencesStore(
+    (state) => state.waitForCustomRhythmSave
+  );
+  const retryCustomRhythmSave = usePreferencesStore(
+    (state) => state.retryCustomRhythmSave
+  );
+  const [pendingNavigation, setPendingNavigation] = useState<
+    'back' | 'start' | null
+  >(null);
+  const [retryPending, setRetryPending] = useState(false);
   const cycleSeconds =
     customRhythm.inhaleSeconds +
     customRhythm.holdSeconds +
     customRhythm.exhaleSeconds;
 
-  function goBack() {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/(tabs)/practice');
+  async function navigateAfterSave(
+    destination: 'back' | 'start',
+    navigate: () => void
+  ) {
+    if (pendingNavigation) return;
+    setPendingNavigation(destination);
+    try {
+      await waitForCustomRhythmSave();
+      setPendingNavigation(null);
+      navigate();
+    } catch {
+      // The store exposes a retryable error and restores the durable rhythm.
+      setPendingNavigation(null);
     }
   }
 
-  function startCustomSession() {
-    router.push({
-      pathname: '/session/[methodId]',
-      params: { methodId: 'custom' }
+  function goBack() {
+    void navigateAfterSave('back', () => {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)/practice');
+      }
     });
   }
 
-  function enqueueRhythmChange(
-    mutate: () => Promise<void>,
-    apply: (current: CustomRhythm) => CustomRhythm,
-    rollback: (previous: CustomRhythm) => Promise<void>
-  ): Promise<void> {
-    const commit = commitTail.current.then(async () => {
-      const previous = persistedRhythm.current;
-      try {
-        await mutate();
-        persistedRhythm.current = apply(previous);
-      } catch {
-        try {
-          await rollback(previous);
-        } catch {
-          // Store actions update synchronously, so the last persisted value is
-          // restored in memory even when the compensating write also fails.
-        }
-      }
+  function startCustomSession() {
+    void navigateAfterSave('start', () => {
+      router.push({
+        pathname: '/session/[methodId]',
+        params: { methodId: 'custom' }
+      });
     });
-    commitTail.current = commit.catch(() => undefined);
-    return commit;
+  }
+
+  async function retrySave() {
+    if (retryPending) return;
+    setRetryPending(true);
+    try {
+      await retryCustomRhythmSave();
+    } catch {
+      // Keep the retry affordance visible for another attempt.
+    } finally {
+      setRetryPending(false);
+    }
   }
 
   function changePhase(phase: CustomPhase, value: number): Promise<void> {
-    return enqueueRhythmChange(
-      () => setCustomPhase(phase, value),
-      (current) => ({ ...current, [phase]: value }),
-      async (previous) => {
-        await setCustomPhase(phase, previous[phase]);
-      }
-    );
-  }
-
-  function changeCycleSeconds(value: number): Promise<void> {
-    return enqueueRhythmChange(
-      () => setCustomCycleSeconds(value),
-      (current) => ({
-        ...current,
-        ...redistributeCycleSeconds(current, value)
-      }),
-      async (previous) => {
-        await Promise.allSettled([
-          setCustomPhase('inhaleSeconds', previous.inhaleSeconds),
-          setCustomPhase('holdSeconds', previous.holdSeconds),
-          setCustomPhase('exhaleSeconds', previous.exhaleSeconds)
-        ]);
-      }
-    );
+    return setCustomPhase(phase, value);
   }
 
   function changeDuration(value: number): Promise<void> {
-    if (!isCustomDuration(value)) return Promise.resolve();
-    return enqueueRhythmChange(
-      () => setCustomDuration(value),
-      (current) => ({ ...current, durationMinutes: value }),
-      async (previous) => {
-        await setCustomDuration(previous.durationMinutes);
-      }
-    );
+    return isCustomDuration(value)
+      ? setCustomDuration(value)
+      : Promise.resolve();
   }
 
   return (
@@ -122,6 +110,7 @@ export default function CustomRhythmScreen() {
         styles.content,
         compact ? styles.contentCompact : null
       ]}
+      nestedScrollEnabled
       scrollable
       testID="custom-screen"
     >
@@ -131,6 +120,7 @@ export default function CustomRhythmScreen() {
       >
         <PrototypeIconButton
           accessibilityLabel="返回呼吸训练首页"
+          disabled={pendingNavigation !== null}
           imageStyle={styles.backImage}
           onPress={goBack}
           source={referenceImages.back}
@@ -167,7 +157,7 @@ export default function CustomRhythmScreen() {
           >
             <ScrollWheelPicker
               accessibilityLabel="设置每个周期的时间"
-              onValueChange={changeCycleSeconds}
+              onValueChange={setCustomCycleSeconds}
               testID="custom-cycle-wheel"
               unit="秒"
               value={cycleSeconds}
@@ -236,8 +226,32 @@ export default function CustomRhythmScreen() {
         </View>
       </View>
 
+      {customRhythmSaveError ? (
+        <View style={styles.saveError} testID="custom-save-error">
+          <View
+            accessibilityLabel={customRhythmSaveError}
+            accessibilityLiveRegion="assertive"
+            accessibilityRole="alert"
+            accessible
+          >
+            <AppText accessible={false} style={styles.saveErrorText}>
+              {customRhythmSaveError}
+            </AppText>
+          </View>
+          <PrototypeButton
+            label="重试保存"
+            loading={retryPending}
+            onPress={() => void retrySave()}
+            style={styles.retry}
+            variant="quiet"
+          />
+        </View>
+      ) : null}
+
       <PrototypeButton
+        disabled={pendingNavigation !== null}
         label="开始呼吸"
+        loading={pendingNavigation === 'start'}
         onPress={startCustomSession}
         style={styles.start}
         testID="custom-start"
@@ -358,7 +372,8 @@ const styles = StyleSheet.create({
     lineHeight: 27.14
   },
   cycleWheel: {
-    height: 34,
+    height: 44,
+    marginVertical: -5,
     width: 64
   },
   cycleWheelCompact: {
@@ -419,8 +434,9 @@ const styles = StyleSheet.create({
     lineHeight: 23.1
   },
   durationWheel: {
-    height: 34,
-    marginBottom: -4,
+    height: 44,
+    marginBottom: -9,
+    marginTop: -5,
     width: 94
   },
   durationWheelCompact: {
@@ -431,5 +447,27 @@ const styles = StyleSheet.create({
     marginTop: 16,
     minHeight: 54,
     width: '100%'
+  },
+  saveError: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.86)',
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+    marginTop: 12,
+    minHeight: 44,
+    paddingLeft: 16,
+    paddingRight: 6
+  },
+  saveErrorText: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 18
+  },
+  retry: {
+    minHeight: 44,
+    paddingHorizontal: 10
   }
 });

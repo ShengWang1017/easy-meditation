@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 
 import { AppText } from './AppText';
-import { colors } from '../theme/tokens';
+import { colors, layout } from '../theme/tokens';
 
 export type ScrollWheelPickerProps = {
   values: readonly number[];
@@ -24,6 +24,7 @@ export type ScrollWheelPickerProps = {
 
 const PHASE_ITEM_HEIGHT = 56;
 const INLINE_ITEM_HEIGHT = 34;
+const INLINE_HIT_SLOP = { top: 5, right: 0, bottom: 5, left: 0 } as const;
 
 export function ScrollWheelPicker({
   values,
@@ -37,6 +38,7 @@ export function ScrollWheelPicker({
   const { width } = useWindowDimensions();
   const compact = width <= 380;
   const listRef = useRef<FlatList<number>>(null);
+  const dragCommitIndexRef = useRef<number | null>(null);
   const itemHeight = variant === 'phase' ? PHASE_ITEM_HEIGHT : INLINE_ITEM_HEIGHT;
   const selectedIndex = findSelectedIndex(values, value);
   const selectedValue = values[selectedIndex];
@@ -60,8 +62,33 @@ export function ScrollWheelPicker({
     void commitIndex(index).catch(() => undefined);
   }
 
+  function indexFromOffset(offset: number) {
+    return Math.max(
+      0,
+      Math.min(values.length - 1, Math.round(offset / itemHeight))
+    );
+  }
+
+  function handleScrollBeginDrag() {
+    dragCommitIndexRef.current = null;
+  }
+
+  function handleScrollEndDrag(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    const velocity = event.nativeEvent.velocity?.y;
+    if (typeof velocity === 'number' && Math.abs(velocity) > 0.05) return;
+
+    const index = indexFromOffset(event.nativeEvent.contentOffset.y);
+    dragCommitIndexRef.current = index;
+    scheduleCommit(index);
+  }
+
   function handleMomentumEnd(event: NativeSyntheticEvent<NativeScrollEvent>) {
-    const index = Math.round(event.nativeEvent.contentOffset.y / itemHeight);
+    const index = indexFromOffset(event.nativeEvent.contentOffset.y);
+    if (dragCommitIndexRef.current === index) {
+      dragCommitIndexRef.current = null;
+      return;
+    }
+    dragCommitIndexRef.current = null;
     scheduleCommit(index);
   }
 
@@ -105,10 +132,14 @@ export function ScrollWheelPicker({
           length: itemHeight,
           offset: itemHeight * index
         })}
+        hitSlop={variant === 'inline' ? INLINE_HIT_SLOP : undefined}
         initialNumToRender={values.length}
         initialScrollIndex={Math.max(0, selectedIndex)}
         keyExtractor={(item) => String(item)}
+        nestedScrollEnabled
         onMomentumScrollEnd={handleMomentumEnd}
+        onScrollBeginDrag={handleScrollBeginDrag}
+        onScrollEndDrag={handleScrollEndDrag}
         ref={listRef}
         renderItem={({ item, index }) => {
           const selected = index === selectedIndex;
@@ -178,7 +209,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   inlineRoot: {
-    height: INLINE_ITEM_HEIGHT
+    alignItems: 'center',
+    height: layout.touchTarget,
+    justifyContent: 'center'
   },
   phaseContent: {
     paddingVertical: PHASE_ITEM_HEIGHT

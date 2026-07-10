@@ -24,6 +24,7 @@ import {
 
 export type PrototypeScreenProps = PropsWithChildren<{
   scrollable?: boolean;
+  nestedScrollEnabled?: boolean;
   keyboardAvoiding?: boolean;
   backgroundVariant?: 'practice' | 'records' | 'guide' | 'focus' | 'custom' | 'auth';
   contentStyle?: StyleProp<ViewStyle>;
@@ -93,6 +94,7 @@ function PrototypeHalo({ variant }: { variant: HaloVariant }) {
 export function PrototypeScreen({
   children,
   scrollable = false,
+  nestedScrollEnabled = false,
   keyboardAvoiding = false,
   backgroundVariant = 'practice',
   contentStyle,
@@ -113,6 +115,7 @@ export function PrototypeScreen({
     <ScrollView
       contentContainerStyle={[styles.scrollContentContainer]}
       keyboardShouldPersistTaps="handled"
+      nestedScrollEnabled={nestedScrollEnabled}
       showsVerticalScrollIndicator={false}
       style={styles.scrollView}
     >
