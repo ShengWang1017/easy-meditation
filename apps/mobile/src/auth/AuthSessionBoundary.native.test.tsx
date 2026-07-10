@@ -3,6 +3,19 @@ import { jest } from '@jest/globals';
 import { Text } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
+const mockRouterState: {
+  segments: string[];
+  renderSlot: () => React.ReactElement;
+} = {
+  segments: ['(auth)'],
+  renderSlot: () => <Text testID="root-slot">slot</Text>
+};
+const mockNativeSecureStore = {
+  setItemAsync: jest.fn(async () => undefined),
+  getItemAsync: jest.fn(async () => null),
+  deleteItemAsync: jest.fn(async () => undefined)
+};
+
 jest.mock(
   '@easy-meditation/shared',
   () => {
@@ -18,25 +31,45 @@ jest.mock(
   },
   { virtual: true }
 );
-jest.mock('../api/auth', () => ({ getMe: jest.fn() }));
-jest.mock('../query/client', () => ({
-  appQueryClient: new (jest.requireActual<typeof import('@tanstack/react-query')>(
-    '@tanstack/react-query'
-  ).QueryClient)(),
-  activeUserScopeCoordinator: {
-    getUserId: jest.fn(),
-    activate: jest.fn(),
-    retire: jest.fn()
-  }
+jest.mock('../api/auth', () => ({
+  getMe: jest.fn(),
+  login: jest.fn(),
+  logout: jest.fn(),
+  refresh: jest.fn(),
+  register: jest.fn()
 }));
+jest.mock('expo-secure-store', () => ({
+  __esModule: true,
+  setItemAsync: (...args: Parameters<typeof mockNativeSecureStore.setItemAsync>) =>
+    mockNativeSecureStore.setItemAsync(...args),
+  getItemAsync: (...args: Parameters<typeof mockNativeSecureStore.getItemAsync>) =>
+    mockNativeSecureStore.getItemAsync(...args),
+  deleteItemAsync: (...args: Parameters<typeof mockNativeSecureStore.deleteItemAsync>) =>
+    mockNativeSecureStore.deleteItemAsync(...args)
+}));
+jest.mock('../query/client', () => {
+  const { QueryClient } = jest.requireActual<typeof import('@tanstack/react-query')>(
+    '@tanstack/react-query'
+  );
+  return {
+    appQueryClient: new QueryClient({
+      defaultOptions: { queries: { gcTime: 0, retry: false } }
+    }),
+    activeUserScopeCoordinator: {
+      getUserId: jest.fn(),
+      activate: jest.fn(),
+      retire: jest.fn()
+    }
+  };
+});
 jest.mock('expo-router', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
   return {
     Redirect: ({ href }: { href: string }) =>
       React.createElement(Text, { testID: 'root-redirect' }, href),
-    Slot: () => React.createElement(Text, { testID: 'root-slot' }, 'slot'),
-    useSegments: () => ['(auth)']
+    Slot: () => mockRouterState.renderSlot(),
+    useSegments: () => mockRouterState.segments
   };
 });
 jest.mock('../theme/PrototypeFontBoundary', () => ({
@@ -57,8 +90,8 @@ jest.mock('../store/preferencesStore', () => ({
 }));
 
 import type { Me } from '@easy-meditation/shared';
-import { getMe } from '../api/auth';
-import { activeUserScopeCoordinator } from '../query/client';
+import { getMe, login, logout } from '../api/auth';
+import { activeUserScopeCoordinator, appQueryClient } from '../query/client';
 import {
   createUserPreferencesStore,
   hydrateUserPreferencesStore,
@@ -67,6 +100,10 @@ import {
 import { useAuthStore } from '../store/authStore';
 import { createTestQueryClient, renderWithProviders } from '../test/renderWithProviders';
 import { AuthSessionBoundary, useAuthSession } from './AuthSessionBoundary';
+import {
+  createActiveUserScopeCoordinator,
+  type ActiveUserScopeCoordinator
+} from './activeUserScope';
 import RootLayout from '../../app/_layout';
 
 const USER_A: Me = {
@@ -104,9 +141,25 @@ function SessionProbe() {
   return <Text testID="session-user">{session.userId}</Text>;
 }
 
+function ProtectedScopeMount({
+  coordinator
+}: {
+  coordinator: ActiveUserScopeCoordinator;
+}) {
+  React.useEffect(() => {
+    void coordinator.activate('A');
+  }, [coordinator]);
+  return <Text testID="protected-scope-child">mounted</Text>;
+}
+
 const getMeMock = getMe as jest.MockedFunction<typeof getMe>;
+const loginMock = login as jest.MockedFunction<typeof login>;
+const logoutMock = logout as jest.MockedFunction<typeof logout>;
 const activateMock = activeUserScopeCoordinator.activate as jest.MockedFunction<
   typeof activeUserScopeCoordinator.activate
+>;
+const retireMock = activeUserScopeCoordinator.retire as jest.MockedFunction<
+  typeof activeUserScopeCoordinator.retire
 >;
 const createStoreMock = createUserPreferencesStore as jest.MockedFunction<
   typeof createUserPreferencesStore
@@ -118,15 +171,34 @@ const hydrateMock = hydrateUserPreferencesStore as jest.MockedFunction<
 describe('AuthSessionBoundary', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    appQueryClient.clear();
+    mockRouterState.segments = ['(auth)'];
+    mockRouterState.renderSlot = () => <Text testID="root-slot">slot</Text>;
+    mockNativeSecureStore.setItemAsync.mockReset();
+    mockNativeSecureStore.setItemAsync.mockResolvedValue(undefined);
+    mockNativeSecureStore.getItemAsync.mockReset();
+    mockNativeSecureStore.getItemAsync.mockResolvedValue(null);
+    mockNativeSecureStore.deleteItemAsync.mockReset();
+    mockNativeSecureStore.deleteItemAsync.mockResolvedValue(undefined);
+    getMeMock.mockReset();
+    loginMock.mockReset();
+    logoutMock.mockReset();
+    logoutMock.mockResolvedValue(undefined);
+    activateMock.mockReset();
+    retireMock.mockReset();
+    createStoreMock.mockReset();
+    hydrateMock.mockReset();
     useAuthStore.setState({
       accessToken: 'access-a',
       refreshToken: 'refresh-a',
       isRestoring: false,
       restoreError: null,
+      pendingRestoreTokens: null,
       sessionRevision: 1,
       isTerminating: false
     });
     activateMock.mockResolvedValue(undefined);
+    retireMock.mockResolvedValue(undefined);
     createStoreMock.mockImplementation(() => fakeStore());
     hydrateMock.mockResolvedValue(undefined);
   });
@@ -276,6 +348,129 @@ describe('AuthSessionBoundary', () => {
 
     expect(view.getByTestId('session-user').props.children).toBe(USER_A.id);
     expect(hydrateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the root coordinator active across protected child unmount and remount', async () => {
+    const { QueryClient } = jest.requireActual<typeof import('@tanstack/react-query')>(
+      '@tanstack/react-query'
+    );
+    const coordinator = createActiveUserScopeCoordinator(new QueryClient());
+
+    const firstMount = render(<ProtectedScopeMount coordinator={coordinator} />);
+    await waitFor(() => expect(coordinator.getUserId()).toBe('A'));
+    firstMount.unmount();
+
+    expect(coordinator.getUserId()).toBe('A');
+
+    const secondMount = render(<ProtectedScopeMount coordinator={coordinator} />);
+    await waitFor(() => expect(coordinator.getUserId()).toBe('A'));
+    secondMount.unmount();
+
+    expect(coordinator.getUserId()).toBe('A');
+    await coordinator.retire();
+    expect(coordinator.getUserId()).toBeNull();
+  });
+
+  it('never revives A while logout retires it and B retries offline bootstrap', async () => {
+    const originalRestore = useAuthStore.getState().restore;
+    const retirement = deferred<void>();
+    const meB = deferred<Me>();
+    const hydrationB = deferred<void>();
+    getMeMock
+      .mockResolvedValueOnce(USER_A)
+      .mockReturnValueOnce(meB.promise)
+      .mockRejectedValueOnce(new Error('B refetch failed'))
+      .mockResolvedValueOnce(USER_B);
+    hydrateMock
+      .mockResolvedValueOnce(undefined)
+      .mockReturnValueOnce(hydrationB.promise);
+    retireMock.mockReturnValueOnce(retirement.promise);
+    loginMock.mockResolvedValue({
+      accessToken: 'access-b',
+      refreshToken: 'refresh-b'
+    });
+    mockRouterState.segments = ['(tabs)'];
+    mockRouterState.renderSlot = () => <SessionProbe />;
+    useAuthStore.setState({ restore: jest.fn(async () => undefined) });
+
+    const view = render(<RootLayout />);
+    try {
+      await waitFor(() => {
+        expect(view.getByTestId('session-user').props.children).toBe(USER_A.id);
+      });
+
+      let logoutPromise!: Promise<void>;
+      act(() => {
+        logoutPromise = useAuthStore.getState().logout();
+      });
+      await waitFor(() => expect(retireMock).toHaveBeenCalledTimes(1));
+
+      expect(view.queryByTestId('session-user')).toBeNull();
+      expect(view.queryByTestId('root-redirect')).toBeNull();
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: 'access-a',
+        refreshToken: 'refresh-a',
+        isTerminating: true,
+        sessionRevision: 1
+      });
+
+      await act(async () => {
+        retirement.resolve();
+        await logoutPromise;
+      });
+
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: null,
+        refreshToken: null,
+        isTerminating: false,
+        sessionRevision: 2
+      });
+      expect(view.getByTestId('root-redirect').props.children).toBe('/(auth)/login');
+      expect(view.queryByText(USER_A.id)).toBeNull();
+
+      mockRouterState.segments = ['(auth)'];
+      mockRouterState.renderSlot = () => <Text testID="auth-screen">auth</Text>;
+      view.rerender(<RootLayout />);
+      expect(view.getByTestId('auth-screen')).toBeTruthy();
+
+      await act(async () => {
+        await useAuthStore.getState().login({
+          email: 'b@example.com',
+          password: 'password123'
+        });
+      });
+      mockRouterState.segments = ['(tabs)'];
+      mockRouterState.renderSlot = () => <SessionProbe />;
+      view.rerender(<RootLayout />);
+
+      expect(view.queryByTestId('session-user')).toBeNull();
+      expect(view.queryByText(USER_A.id)).toBeNull();
+
+      await act(async () => meB.reject(new Error('B is offline')));
+      await waitFor(() => expect(view.getByText('重新加载')).toBeTruthy());
+      expect(view.queryByTestId('session-user')).toBeNull();
+      expect(view.queryByText(USER_A.id)).toBeNull();
+
+      fireEvent.press(view.getByText('重新加载'));
+      await waitFor(() => expect(getMeMock).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(view.getByText('重新加载')).toBeTruthy());
+      expect(view.queryByTestId('session-user')).toBeNull();
+      expect(view.queryByText(USER_A.id)).toBeNull();
+
+      fireEvent.press(view.getByText('重新加载'));
+      await waitFor(() => expect(activateMock).toHaveBeenLastCalledWith(USER_B.id));
+      await waitFor(() => expect(hydrateMock).toHaveBeenCalledTimes(2));
+      expect(view.queryByTestId('session-user')).toBeNull();
+      expect(view.queryByText(USER_A.id)).toBeNull();
+
+      await act(async () => hydrationB.resolve());
+      await waitFor(() => {
+        expect(view.getByTestId('session-user').props.children).toBe(USER_B.id);
+      });
+    } finally {
+      view.unmount();
+      useAuthStore.setState({ restore: originalRestore });
+    }
   });
 
   it('renders auth-group routes outside the protected boundary when signed out', () => {

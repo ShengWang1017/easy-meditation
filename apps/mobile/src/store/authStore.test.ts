@@ -35,6 +35,7 @@ describe('useAuthStore', () => {
       refreshToken: null,
       isRestoring: true,
       restoreError: null,
+      pendingRestoreTokens: null,
       sessionRevision: 0,
       isTerminating: false
     });
@@ -84,13 +85,16 @@ describe('useAuthStore', () => {
     });
   });
 
-  it('keeps rotated tokens in memory when persisting them after restore fails', async () => {
+  it('keeps the restore gate closed and retries persisting rotated tokens before refreshing again', async () => {
     secureStore.getItemAsync.mockResolvedValue('old-refresh');
     vi.spyOn(authApi, 'refresh').mockResolvedValue({
       accessToken: 'new-access',
       refreshToken: 'new-refresh'
     });
-    secureStore.setItemAsync.mockRejectedValue(new Error('secure store write failed'));
+    const storageError = new Error('secure store write failed');
+    secureStore.setItemAsync
+      .mockRejectedValueOnce(storageError)
+      .mockResolvedValueOnce(undefined);
 
     await expect(useAuthStore.getState().restore()).resolves.toBeUndefined();
 
@@ -98,11 +102,30 @@ describe('useAuthStore', () => {
       'easyMeditation.refreshToken',
       'new-refresh'
     );
-    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('easyMeditation.refreshToken');
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: 'new-refresh',
+      isRestoring: false,
+      restoreError: storageError,
+      sessionRevision: 0
+    });
+
+    await expect(useAuthStore.getState().restore()).resolves.toBeUndefined();
+
+    expect(secureStore.getItemAsync).toHaveBeenCalledTimes(1);
+    expect(authApi.refresh).toHaveBeenCalledTimes(1);
+    expect(secureStore.setItemAsync).toHaveBeenCalledTimes(2);
+    expect(secureStore.setItemAsync).toHaveBeenLastCalledWith(
+      'easyMeditation.refreshToken',
+      'new-refresh'
+    );
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: 'new-access',
       refreshToken: 'new-refresh',
-      isRestoring: false
+      isRestoring: false,
+      restoreError: null,
+      sessionRevision: 1
     });
   });
 
@@ -254,6 +277,52 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: 'new-access',
       refreshToken: 'new-refresh',
+      sessionRevision: 7
+    });
+  });
+
+  it('does not let a stale failed token write delete a newer persisted refresh token', async () => {
+    useAuthStore.setState({
+      accessToken: 'access-0',
+      refreshToken: 'refresh-0',
+      isRestoring: false,
+      sessionRevision: 7
+    });
+    let rejectOldWrite!: (error: Error) => void;
+    const oldWrite = new Promise<void>((_resolve, reject) => {
+      rejectOldWrite = reject;
+    });
+    secureStore.setItemAsync
+      .mockReturnValueOnce(oldWrite)
+      .mockResolvedValueOnce(undefined);
+
+    const firstRotation = useAuthStore.getState().acceptRefreshedTokens(
+      { accessToken: 'access-1', refreshToken: 'refresh-1' },
+      'refresh-0'
+    );
+    const secondRotation = useAuthStore.getState().acceptRefreshedTokens(
+      { accessToken: 'access-2', refreshToken: 'refresh-2' },
+      'refresh-1'
+    );
+    await secondRotation;
+
+    rejectOldWrite(new Error('stale write failed late'));
+    await firstRotation;
+
+    expect(secureStore.setItemAsync).toHaveBeenNthCalledWith(
+      1,
+      'easyMeditation.refreshToken',
+      'refresh-1'
+    );
+    expect(secureStore.setItemAsync).toHaveBeenNthCalledWith(
+      2,
+      'easyMeditation.refreshToken',
+      'refresh-2'
+    );
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'access-2',
+      refreshToken: 'refresh-2',
       sessionRevision: 7
     });
   });

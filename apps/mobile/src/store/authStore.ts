@@ -23,6 +23,7 @@ type AuthState = AuthTerminationState & {
   refreshToken: string | null;
   isRestoring: boolean;
   restoreError: unknown | null;
+  pendingRestoreTokens: TokenPair | null;
   sessionRevision: number;
   login(input: AuthLoginInput): Promise<void>;
   register(input: AuthRegisterInput): Promise<void>;
@@ -34,6 +35,7 @@ type AuthState = AuthTerminationState & {
 let restorePromise: Promise<void> | null = null;
 let cleanupTail: Promise<void> = Promise.resolve();
 let terminalClearScheduled = false;
+let tokenPersistenceGeneration = 0;
 
 function isInvalidRefreshTokenError(error: unknown): error is ApiRequestError {
   return (
@@ -44,6 +46,7 @@ function isInvalidRefreshTokenError(error: unknown): error is ApiRequestError {
 }
 
 async function deleteStoredRefreshToken(): Promise<void> {
+  tokenPersistenceGeneration += 1;
   try {
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
   } catch {
@@ -66,6 +69,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       refreshToken: null,
       isRestoring: false,
       restoreError: null,
+      pendingRestoreTokens: null,
       isTerminating: false,
       sessionRevision:
         state.sessionRevision + (state.accessToken !== null ? 1 : 0)
@@ -77,28 +81,33 @@ export const useAuthStore = create<AuthState>((set, get) => {
     refreshToken: null,
     isRestoring: true,
     restoreError: null,
+    pendingRestoreTokens: null,
     sessionRevision: 0,
     isTerminating: false,
     async login(input) {
       const tokens = await authApi.login(input);
+      tokenPersistenceGeneration += 1;
       await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
       set((state) => ({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         isRestoring: false,
         restoreError: null,
+        pendingRestoreTokens: null,
         isTerminating: false,
         sessionRevision: state.sessionRevision + 1
       }));
     },
     async register(input) {
       const result = await authApi.register(input);
+      tokenPersistenceGeneration += 1;
       await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, result.tokens.refreshToken);
       set((state) => ({
         accessToken: result.tokens.accessToken,
         refreshToken: result.tokens.refreshToken,
         isRestoring: false,
         restoreError: null,
+        pendingRestoreTokens: null,
         isTerminating: false,
         sessionRevision: state.sessionRevision + 1
       }));
@@ -110,6 +119,37 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
       restorePromise = (async () => {
         set({ isRestoring: true, restoreError: null });
+        const pendingRestoreTokens = get().pendingRestoreTokens;
+        if (pendingRestoreTokens) {
+          try {
+            tokenPersistenceGeneration += 1;
+            await SecureStore.setItemAsync(
+              REFRESH_TOKEN_KEY,
+              pendingRestoreTokens.refreshToken
+            );
+          } catch (error) {
+            set({
+              accessToken: null,
+              refreshToken: pendingRestoreTokens.refreshToken,
+              isRestoring: false,
+              restoreError: error,
+              pendingRestoreTokens
+            });
+            return;
+          }
+
+          set((state) => ({
+            accessToken: pendingRestoreTokens.accessToken,
+            refreshToken: pendingRestoreTokens.refreshToken,
+            isRestoring: false,
+            restoreError: null,
+            pendingRestoreTokens: null,
+            isTerminating: false,
+            sessionRevision: state.sessionRevision + 1
+          }));
+          return;
+        }
+
         let savedRefreshToken: string | null;
 
         try {
@@ -124,7 +164,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
             accessToken: null,
             refreshToken: null,
             isRestoring: false,
-            restoreError: null
+            restoreError: null,
+            pendingRestoreTokens: null
           });
           return;
         }
@@ -139,16 +180,33 @@ export const useAuthStore = create<AuthState>((set, get) => {
               accessToken: null,
               refreshToken: null,
               isRestoring: false,
-              restoreError: null
+              restoreError: null,
+              pendingRestoreTokens: null
             });
           } else {
             set({
               accessToken: null,
               refreshToken: savedRefreshToken,
               isRestoring: false,
-              restoreError: error
+              restoreError: error,
+              pendingRestoreTokens: null
             });
           }
+          return;
+        }
+
+        try {
+          tokenPersistenceGeneration += 1;
+          await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
+        } catch (error) {
+          set({
+            accessToken: null,
+            refreshToken: tokens.refreshToken,
+            isRestoring: false,
+            restoreError: error,
+            pendingRestoreTokens: tokens,
+            isTerminating: false
+          });
           return;
         }
 
@@ -157,15 +215,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
           refreshToken: tokens.refreshToken,
           isRestoring: false,
           restoreError: null,
+          pendingRestoreTokens: null,
           isTerminating: false,
           sessionRevision: state.sessionRevision + 1
         }));
-
-        try {
-          await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
-        } catch {
-          await deleteStoredRefreshToken();
-        }
       })().finally(() => {
         restorePromise = null;
       });
@@ -221,13 +274,21 @@ export const useAuthStore = create<AuthState>((set, get) => {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         isRestoring: false,
-        restoreError: null
+        restoreError: null,
+        pendingRestoreTokens: null
       });
 
+      const persistenceGeneration = ++tokenPersistenceGeneration;
       try {
         await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
       } catch {
-        await deleteStoredRefreshToken();
+        const latest = get();
+        if (
+          persistenceGeneration === tokenPersistenceGeneration &&
+          latest.refreshToken === tokens.refreshToken
+        ) {
+          await deleteStoredRefreshToken();
+        }
       }
       return true;
     }

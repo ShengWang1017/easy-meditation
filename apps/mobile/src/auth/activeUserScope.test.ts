@@ -6,12 +6,23 @@ import * as sessionScope from './sessionScope';
 
 describe('createActiveUserScopeCoordinator', () => {
   it('keeps the active user at root lifetime until explicitly retired', async () => {
+    const retireSpy = vi.spyOn(sessionScope, 'retireUserScope');
     const coordinator = createActiveUserScopeCoordinator(new QueryClient());
+    const protectedChild = {
+      mount: () => coordinator.activate('A'),
+      unmount: vi.fn()
+    };
 
-    await coordinator.activate('A');
+    await protectedChild.mount();
+    protectedChild.unmount();
 
     expect(coordinator.getUserId()).toBe('A');
+    expect(retireSpy).not.toHaveBeenCalled();
+
+    await protectedChild.mount();
+
     expect(coordinator.getUserId()).toBe('A');
+    expect(retireSpy).not.toHaveBeenCalled();
   });
 
   it('treats activating the current user as a no-op', async () => {
