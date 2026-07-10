@@ -223,6 +223,28 @@ export function compareTypography(reference, native) {
   };
 }
 
+export function validateExactChecks(exactChecks) {
+  const requiredKeys = ['assets', 'colors', 'copy'];
+  const keys =
+    exactChecks && typeof exactChecks === 'object' && !Array.isArray(exactChecks)
+      ? Object.keys(exactChecks).sort()
+      : [];
+  if (
+    keys.length !== requiredKeys.length ||
+    !requiredKeys.every((key, index) => keys[index] === key) ||
+    requiredKeys.some((key) => typeof exactChecks[key] !== 'boolean')
+  ) {
+    throw new TypeError(
+      'exactChecks must contain exactly boolean colors, copy, and assets'
+    );
+  }
+  return {
+    colors: exactChecks.colors,
+    copy: exactChecks.copy,
+    assets: exactChecks.assets
+  };
+}
+
 async function writeOverlay(reference, native, outputPath) {
   const halfOpacityNative = clonePng(native);
   for (let offset = 3; offset < halfOpacityNative.data.length; offset += 4) {
@@ -257,6 +279,7 @@ export async function compareVisualArtifacts({
   textElementIds,
   exactChecks
 }) {
+  const validatedExactChecks = validateExactChecks(exactChecks);
   const [referenceBuffer, nativeBuffer] = await Promise.all([
     readFile(referencePath),
     readFile(nativePath)
@@ -349,7 +372,7 @@ export async function compareVisualArtifacts({
   const pass =
     Object.values(elements).every((element) => element.pass) &&
     Object.values(typography).every((text) => text.pass) &&
-    Object.values(exactChecks).every((check) => check === true);
+    Object.values(validatedExactChecks).every((check) => check === true);
   const result = {
     state,
     platform,
@@ -361,7 +384,7 @@ export async function compareVisualArtifacts({
     },
     elements,
     typography,
-    exactChecks: { ...exactChecks },
+    exactChecks: validatedExactChecks,
     pass
   };
 

@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
@@ -24,20 +24,60 @@ function validateSafeArea(safeArea) {
   return normalized;
 }
 
-function validateElements(elements) {
+function validateElements(elements, expectedState) {
   if (!elements || typeof elements !== 'object' || Array.isArray(elements)) {
     throw new Error('VISUAL_QA_READY elements must be an object');
   }
   for (const [id, rect] of Object.entries(elements)) {
     for (const key of ['x', 'y', 'width', 'height']) {
-      if (!Number.isFinite(rect?.[key])) {
-        throw new Error(`VISUAL_QA_READY elements.${id}.${key} must be finite`);
+      if (!Number.isFinite(rect?.[key]) || rect[key] < 0) {
+        throw new Error(
+          `VISUAL_QA_READY elements.${id}.${key} must be finite and non-negative`
+        );
       }
+    }
+  }
+
+  const manifest = getVisualQaState(expectedState);
+  for (const id of [
+    ...manifest.primaryElementIds,
+    ...manifest.textElementIds
+  ]) {
+    if (!elements[id]) {
+      throw new Error(
+        `VISUAL_QA_READY ${expectedState} missing required element: ${id}`
+      );
+    }
+  }
+  for (const id of manifest.textElementIds) {
+    const text = elements[id];
+    if (typeof text.fontFamily !== 'string' || text.fontFamily.length === 0) {
+      throw new Error(`VISUAL_QA_READY text ${id}.fontFamily is required`);
+    }
+    if (
+      !(
+        (typeof text.fontWeight === 'string' && text.fontWeight.length > 0) ||
+        Number.isFinite(text.fontWeight)
+      )
+    ) {
+      throw new Error(`VISUAL_QA_READY text ${id}.fontWeight is required`);
+    }
+    for (const key of ['fontSize', 'lineHeight']) {
+      if (!Number.isFinite(text[key]) || text[key] <= 0) {
+        throw new Error(
+          `VISUAL_QA_READY text ${id}.${key} must be finite and positive`
+        );
+      }
+    }
+    if (!Number.isInteger(text.lines) || text.lines <= 0) {
+      throw new Error(
+        `VISUAL_QA_READY text ${id}.lines must be a positive integer`
+      );
     }
   }
 }
 
-function validateReadyPayload(payload) {
+function validateReadyPayload(payload, expectedState) {
   if (payload?.marker !== 'VISUAL_QA_READY') {
     throw new Error('Invalid VISUAL_QA_READY marker');
   }
@@ -49,7 +89,7 @@ function validateReadyPayload(payload) {
     throw new Error('VISUAL_QA_READY pixelRatio must be positive');
   }
   validateSafeArea(payload.safeArea);
-  validateElements(payload.elements);
+  validateElements(payload.elements, expectedState);
   return payload;
 }
 
@@ -70,8 +110,17 @@ export function parseReadyLine(line, expectedState) {
   } catch {
     throw new Error('Malformed VISUAL_QA_READY JSON');
   }
-  validateReadyPayload(payload);
-  return payload.state === expectedState ? payload : null;
+  if (payload?.marker !== 'VISUAL_QA_READY') {
+    throw new Error('Invalid VISUAL_QA_READY marker');
+  }
+  if (typeof payload.state !== 'string') {
+    throw new Error('VISUAL_QA_READY state is required');
+  }
+  getVisualQaState(payload.state);
+  if (payload.state !== expectedState) {
+    return null;
+  }
+  return validateReadyPayload(payload, expectedState);
 }
 
 export async function waitForReady({
@@ -132,6 +181,18 @@ export async function normalizeNative(rawPath, outputPath, metrics) {
     .toFile(outputPath);
 
   return { logicalWidth, logicalHeight, safeArea };
+}
+
+function validateMetricsPath(metricsPath) {
+  if (!path.isAbsolute(metricsPath) || path.extname(metricsPath) !== '.json') {
+    throw new Error('Native metrics output must be an absolute JSON path');
+  }
+}
+
+export async function writeReadyMetrics(metricsPath, metrics) {
+  validateMetricsPath(metricsPath);
+  await mkdir(path.dirname(metricsPath), { recursive: true });
+  await writeFile(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`);
 }
 
 function validateSince(since) {
@@ -322,7 +383,8 @@ export function parseNativeCliArgs(args) {
     '--url',
     '--since',
     '--raw',
-    '--output'
+    '--output',
+    '--metrics'
   ]) {
     if (!flags.get(required)) {
       throw new Error(`Missing required native capture argument: ${required}`);
@@ -336,6 +398,8 @@ export function parseNativeCliArgs(args) {
   }
   const state = flags.get('--state');
   getVisualQaState(state);
+  const metricsPath = flags.get('--metrics');
+  validateMetricsPath(metricsPath);
 
   return {
     platform,
@@ -344,7 +408,8 @@ export function parseNativeCliArgs(args) {
     nativeUrl: flags.get('--url'),
     since: flags.get('--since'),
     rawScreenshotPath: flags.get('--raw'),
-    outputPath: flags.get('--output')
+    outputPath: flags.get('--output'),
+    metricsPath
   };
 }
 
@@ -392,9 +457,13 @@ export async function main(args, dependencies = {}) {
     state: options.state,
     adapter: dependencies.adapter ?? createExecAdapter()
   });
-  await normalizeNative(
+  await (dependencies.normalize ?? normalizeNative)(
     options.rawScreenshotPath,
     options.outputPath,
+    metrics
+  );
+  await (dependencies.writeMetrics ?? writeReadyMetrics)(
+    options.metricsPath,
     metrics
   );
   return metrics;

@@ -45,13 +45,14 @@ The iOS extractor requires an existing trace plus explicit paths and device
 identity. It only exports an already-collected trace; it does not record one:
 
 ```bash
-npm run qa:perf:ios -- \
-  --device <IOS_UDID> \
-  --trace /absolute/path/core-animation.trace \
-  --toc /absolute/path/core-animation-toc.xml \
-  --table /absolute/path/core-animation-table.xml \
-  --output /absolute/path/ios-frame-durations.json
+IOS_DEVICE_UDID=<IOS_UDID> \
+IOS_TRACE_PATH=/absolute/path/core-animation.trace \
+npm run qa:perf:ios
 ```
+
+The script exports to `qa/perf/ios-frame-durations.json` and immediately feeds
+that exact file to the shared frame gate. Extractor failure or a failed 55-FPS /
+long-frame gate therefore makes the full command fail.
 
 ## Coordinate And Evidence Contract
 

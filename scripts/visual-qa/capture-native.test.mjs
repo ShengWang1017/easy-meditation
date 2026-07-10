@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -10,10 +10,12 @@ import {
   buildAndroidCaptureCommands,
   buildIosCaptureCommands,
   executeNativeCapturePlan,
+  main as runNativeCli,
   normalizeNative,
   parseNativeCliArgs,
   parseReadyLine,
-  waitForReady
+  waitForReady,
+  writeReadyMetrics
 } from './capture-native.mjs';
 
 const READY_PAYLOAD = {
@@ -22,7 +24,33 @@ const READY_PAYLOAD = {
   pixelRatio: 3,
   safeArea: { top: 47, right: 0, bottom: 34, left: 0 },
   elements: {
-    'mode-grid': { x: 24, y: 180, width: 342, height: 371 }
+    'training-header': { x: 24, y: 55, width: 342, height: 50 },
+    'training-intro': { x: 24, y: 151, width: 342, height: 33 },
+    'mode-grid': { x: 24, y: 206, width: 342, height: 371 },
+    'before-card': { x: 34, y: 601, width: 322, height: 112 },
+    'bottom-nav': { x: 110, y: 746, width: 170, height: 42 },
+    'training-title': {
+      x: 119,
+      y: 58,
+      width: 152,
+      height: 38,
+      fontFamily: 'LXGWWenKai-Medium',
+      fontWeight: 800,
+      fontSize: 32,
+      lineHeight: 38,
+      lines: 1
+    },
+    'training-intro-copy': {
+      x: 24,
+      y: 151,
+      width: 342,
+      height: 33,
+      fontFamily: 'LXGWWenKai-Medium',
+      fontWeight: 800,
+      fontSize: 26,
+      lineHeight: 33,
+      lines: 1
+    }
   }
 };
 
@@ -51,6 +79,63 @@ test('rejects malformed READY payloads explicitly', () => {
       ),
     /pixelRatio must be positive/
   );
+});
+
+test('requires every manifest element with non-negative finite rectangles', () => {
+  const missing = structuredClone(READY_PAYLOAD);
+  delete missing.elements['before-card'];
+  assert.throws(
+    () => parseReadyLine(JSON.stringify(missing), 'practice'),
+    /VISUAL_QA_READY practice missing required element: before-card/
+  );
+
+  const negative = structuredClone(READY_PAYLOAD);
+  negative.elements['mode-grid'].x = -1;
+  assert.throws(
+    () => parseReadyLine(JSON.stringify(negative), 'practice'),
+    /VISUAL_QA_READY elements\.mode-grid\.x must be finite and non-negative/
+  );
+});
+
+test('requires complete typography metadata for every text manifest ID', () => {
+  const missingFamily = structuredClone(READY_PAYLOAD);
+  delete missingFamily.elements['training-title'].fontFamily;
+  assert.throws(
+    () => parseReadyLine(JSON.stringify(missingFamily), 'practice'),
+    /VISUAL_QA_READY text training-title\.fontFamily is required/
+  );
+
+  const invalidSize = structuredClone(READY_PAYLOAD);
+  invalidSize.elements['training-title'].fontSize = null;
+  assert.throws(
+    () => parseReadyLine(JSON.stringify(invalidSize), 'practice'),
+    /VISUAL_QA_READY text training-title\.fontSize must be finite and positive/
+  );
+
+  const invalidLines = structuredClone(READY_PAYLOAD);
+  invalidLines.elements['training-title'].lines = 0;
+  assert.throws(
+    () => parseReadyLine(JSON.stringify(invalidLines), 'practice'),
+    /VISUAL_QA_READY text training-title\.lines must be a positive integer/
+  );
+});
+
+test('polling propagates malformed matching READY payloads immediately', async () => {
+  const malformed = structuredClone(READY_PAYLOAD);
+  delete malformed.elements['bottom-nav'];
+  let sleeps = 0;
+  await assert.rejects(
+    waitForReady({
+      state: 'practice',
+      readLog: async () => JSON.stringify(malformed),
+      now: () => 0,
+      sleep: async () => {
+        sleeps += 1;
+      }
+    }),
+    /VISUAL_QA_READY practice missing required element: bottom-nav/
+  );
+  assert.equal(sleeps, 0);
 });
 
 test('polls injected logs until READY without using wall-clock sleeps', async () => {
@@ -233,7 +318,9 @@ test('requires complete direct-execution arguments before an adapter can run', (
       '--raw',
       '/tmp/raw.png',
       '--output',
-      '/tmp/logical.png'
+      '/tmp/logical.png',
+      '--metrics',
+      '/tmp/native-metrics.json'
     ]),
     {
       platform: 'android',
@@ -242,7 +329,96 @@ test('requires complete direct-execution arguments before an adapter can run', (
       nativeUrl: 'easy-meditation:///practice?visualQaState=practice',
       since: '2026-07-10T12:00:00.000Z',
       rawScreenshotPath: '/tmp/raw.png',
-      outputPath: '/tmp/logical.png'
+      outputPath: '/tmp/logical.png',
+      metricsPath: '/tmp/native-metrics.json'
     }
   );
+});
+
+test('requires an explicit absolute JSON metrics path', () => {
+  const completeWithoutMetrics = [
+    'ios',
+    '--udid',
+    '00008110-001234567890001E',
+    '--state',
+    'practice',
+    '--url',
+    'easy-meditation:///practice?visualQaState=practice',
+    '--since',
+    '2026-07-10T12:00:00.000Z',
+    '--raw',
+    '/tmp/raw.png',
+    '--output',
+    '/tmp/logical.png'
+  ];
+  assert.throws(
+    () => parseNativeCliArgs(completeWithoutMetrics),
+    /Missing required native capture argument: --metrics/
+  );
+  assert.throws(
+    () =>
+      parseNativeCliArgs([
+        ...completeWithoutMetrics,
+        '--metrics',
+        'relative.json'
+      ]),
+    /Native metrics output must be an absolute JSON path/
+  );
+});
+
+test('writes deterministic READY metrics and creates the parent directory', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'easy-meditation-metrics-'));
+  try {
+    const metricsPath = path.join(directory, 'nested', 'native-metrics.json');
+    await writeReadyMetrics(metricsPath, READY_PAYLOAD);
+    assert.equal(
+      await readFile(metricsPath, 'utf8'),
+      `${JSON.stringify(READY_PAYLOAD, null, 2)}\n`
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('native CLI persists READY metrics through injected host adapters', async () => {
+  const calls = [];
+  const metricsPath = '/tmp/easy-meditation/native-metrics.json';
+  const result = await runNativeCli(
+    [
+      'android',
+      '--serial',
+      'emulator-5554',
+      '--state',
+      'practice',
+      '--url',
+      'easy-meditation:///practice?visualQaState=practice',
+      '--since',
+      '2026-07-10T12:00:00.000Z',
+      '--raw',
+      '/tmp/raw.png',
+      '--output',
+      '/tmp/logical.png',
+      '--metrics',
+      metricsPath
+    ],
+    {
+      adapter: {
+        run: async () => calls.push('run'),
+        read: async () => {
+          calls.push('read');
+          return JSON.stringify(READY_PAYLOAD);
+        },
+        capture: async () => calls.push('capture')
+      },
+      normalize: async () => calls.push('normalize'),
+      writeMetrics: async (filePath, payload) => {
+        calls.push('metrics');
+        assert.equal(filePath, metricsPath);
+        assert.deepEqual(payload, READY_PAYLOAD);
+      }
+    }
+  );
+
+  assert.deepEqual(result, READY_PAYLOAD);
+  assert.deepEqual(calls, ['run', 'read', 'capture', 'normalize', 'metrics']);
 });

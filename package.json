@@ -18,7 +18,7 @@
     "qa:visual:android": "node scripts/visual-qa/capture-native.mjs android",
     "qa:visual:compare": "node scripts/visual-qa/compare.mjs",
     "qa:perf:android": "node scripts/perf/analyze-frames.mjs",
-    "qa:perf:ios": "node scripts/perf/extract-ios-core-animation.mjs",
+    "qa:perf:ios": "node scripts/perf/extract-ios-core-animation.mjs --device \"$IOS_DEVICE_UDID\" --trace \"$IOS_TRACE_PATH\" --toc \"$PWD/qa/perf/ios-core-animation-toc.xml\" --table \"$PWD/qa/perf/ios-core-animation-table.xml\" --output \"$PWD/qa/perf/ios-frame-durations.json\" && node scripts/perf/analyze-frames.mjs \"$PWD/qa/perf/ios-frame-durations.json\"",
     "predev:api": "npm --prefix packages/shared run build",
     "dev:api": "npm --workspace apps/api run dev",
     "predev:mobile": "npm --prefix packages/shared run build",

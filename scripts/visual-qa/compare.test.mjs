@@ -11,7 +11,8 @@ import { PNG } from 'pngjs';
 import {
   compareBounds,
   compareTypography,
-  compareVisualArtifacts
+  compareVisualArtifacts,
+  validateExactChecks
 } from './compare.mjs';
 
 const ZERO_SAFE_AREA = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -365,6 +366,41 @@ test('any false exact check fails the fixed measurement result', async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('requires exactly three boolean exact checks before reading artifacts', async () => {
+  const message = /exactChecks must contain exactly boolean colors, copy, and assets/;
+  for (const value of [
+    undefined,
+    null,
+    {},
+    { colors: true, copy: true },
+    { colors: true, copy: true, assets: true, extra: true },
+    { colors: true, copy: 'yes', assets: true }
+  ]) {
+    assert.throws(() => validateExactChecks(value), message);
+  }
+  assert.deepEqual(
+    validateExactChecks({ colors: true, copy: false, assets: true }),
+    { colors: true, copy: false, assets: true }
+  );
+
+  await assert.rejects(
+    compareVisualArtifacts({
+      state: 'practice',
+      platform: 'ios',
+      viewport: '390x844',
+      referencePath: '/does/not/exist-reference.png',
+      nativePath: '/does/not/exist-native.png',
+      outputDirectory: '/does/not/matter',
+      referenceMetrics: {},
+      nativeMetrics: {},
+      primaryElementIds: [],
+      textElementIds: [],
+      exactChecks: { colors: true, copy: true }
+    }),
+    message
+  );
 });
 
 test('direct execution fails explicitly until a validated comparison job is wired', () => {
