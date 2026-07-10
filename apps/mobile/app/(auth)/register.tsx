@@ -1,166 +1,159 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, router } from 'expo-router';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Screen } from '../../src/components/Screen';
+import { StyleSheet, TextInput, View } from 'react-native';
+
+import { AuthScaffold } from '../../src/components/AuthScaffold';
+import { AuthTextField } from '../../src/components/AuthTextField';
+import { AppText } from '../../src/components/AppText';
+import { PrototypeButton } from '../../src/components/PrototypeButton';
+import {
+  getAuthFormErrors,
+  type AuthFormErrors
+} from '../../src/domain/authFormErrors';
 import { useAuthStore } from '../../src/store/authStore';
-import { colors, radii, shadowSoft, spacing } from '../../src/theme/tokens';
+import { fontFamilies } from '../../src/theme/fonts';
+import { colors, radii, spacing } from '../../src/theme/tokens';
 
 export default function RegisterScreen() {
   const register = useAuthStore((state) => state.register);
+  const nicknameRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const submittingRef = useRef(false);
   const [email, setEmail] = useState('');
   const [nickname, setNickname] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState<AuthFormErrors>({ fields: {} });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function submit() {
-    if (isSubmitting) {
+    if (submittingRef.current) {
       return;
     }
 
-    setError('');
+    submittingRef.current = true;
+    setErrors({ fields: {} });
     setIsSubmitting(true);
 
     try {
+      const trimmedNickname = nickname.trim();
       await register({
         email,
-        nickname: nickname.trim() ? nickname.trim() : undefined,
+        nickname: trimmedNickname || undefined,
         password
       });
       router.replace('/(tabs)/practice');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '注册失败，请再试一次。');
+    } catch (error) {
+      setPassword('');
+      setErrors(getAuthFormErrors(error));
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   return (
-    <Screen scrollable>
-      <View style={styles.form}>
-        <View style={styles.header}>
-          <Text style={styles.eyebrow}>开始新的呼吸节奏</Text>
-          <Text style={styles.title}>创建账号</Text>
-          <Text style={styles.subtitle}>账号建好后，练习记录和设置就能跟着你一起走。</Text>
-        </View>
+    <AuthScaffold
+      eyebrow="开始新的呼吸节奏"
+      subtitle="账号建好后，练习记录和设置就能跟着你一起走。"
+      title="创建账号"
+    >
+      <View style={styles.fields}>
+        <AuthTextField
+          autoCapitalize="none"
+          autoComplete="email"
+          editable={!isSubmitting}
+          error={errors.fields.email}
+          keyboardType="email-address"
+          label="邮箱"
+          name="email"
+          onChangeText={setEmail}
+          onSubmitEditing={() => nicknameRef.current?.focus()}
+          placeholder="you@example.com"
+          returnKeyType="next"
+          submitBehavior="submit"
+          textContentType="emailAddress"
+          value={email}
+        />
+        <AuthTextField
+          autoCapitalize="words"
+          autoComplete="name"
+          editable={!isSubmitting}
+          error={errors.fields.nickname}
+          label="昵称，可不填"
+          name="nickname"
+          onChangeText={setNickname}
+          onSubmitEditing={() => passwordRef.current?.focus()}
+          placeholder="怎么称呼你"
+          ref={nicknameRef}
+          returnKeyType="next"
+          submitBehavior="submit"
+          textContentType="nickname"
+          value={nickname}
+        />
+        <AuthTextField
+          autoComplete="new-password"
+          editable={!isSubmitting}
+          error={errors.fields.password}
+          label="密码"
+          name="password"
+          onChangeText={setPassword}
+          onSubmitEditing={() => void submit()}
+          placeholder="至少 8 位"
+          ref={passwordRef}
+          returnKeyType="done"
+          secureTextEntry
+          submitBehavior="blurAndSubmit"
+          textContentType="newPassword"
+          value={password}
+        />
+      </View>
 
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>邮箱</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoComplete="email"
-            keyboardType="email-address"
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            placeholderTextColor={colors.muted}
-            style={styles.input}
-            value={email}
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>昵称，可不填</Text>
-          <TextInput
-            onChangeText={setNickname}
-            placeholder="怎么称呼你"
-            placeholderTextColor={colors.muted}
-            style={styles.input}
-            value={nickname}
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>密码</Text>
-          <TextInput
-            autoComplete="new-password"
-            onChangeText={setPassword}
-            placeholder="至少 8 位"
-            placeholderTextColor={colors.muted}
-            secureTextEntry
-            style={styles.input}
-            value={password}
-          />
-        </View>
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        <Pressable onPress={submit} style={[styles.button, isSubmitting && styles.buttonDisabled]}>
-          <Text style={styles.buttonLabel}>{isSubmitting ? '提交中...' : '注册并开始'}</Text>
-        </Pressable>
-
+      <View style={styles.actions} testID="register-actions">
+        {errors.form ? (
+          <AppText
+            accessibilityLiveRegion="polite"
+            accessibilityRole="alert"
+            testID="register-form-error"
+            tone="danger"
+            variant="meta"
+          >
+            {errors.form}
+          </AppText>
+        ) : null}
+        <PrototypeButton
+          label={isSubmitting ? '提交中...' : '注册并开始'}
+          loading={isSubmitting}
+          onPress={() => void submit()}
+          style={styles.primaryAction}
+        />
         <Link href="/(auth)/login" style={styles.link}>
           已有账号，去登录
         </Link>
       </View>
-    </Screen>
+    </AuthScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  form: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: spacing.lg
+  fields: {
+    gap: spacing.md
   },
-  header: {
+  actions: {
     gap: spacing.sm
   },
-  eyebrow: {
-    color: colors.accentStrong,
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 34,
-    fontWeight: '700'
-  },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 16,
-    lineHeight: 24
-  },
-  fieldGroup: {
-    gap: spacing.sm
-  },
-  label: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600'
-  },
-  input: {
-    minHeight: 56,
+  primaryAction: {
     borderRadius: radii.md,
-    backgroundColor: colors.surfaceStrong,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-    paddingHorizontal: spacing.md,
-    color: colors.ink,
-    ...shadowSoft
-  },
-  error: {
-    color: colors.danger,
-    fontSize: 14
-  },
-  button: {
-    minHeight: 54,
-    borderRadius: 18,
-    backgroundColor: colors.accentStrong,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  buttonDisabled: {
-    opacity: 0.7
-  },
-  buttonLabel: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700'
+    minHeight: 54
   },
   link: {
-    color: colors.accentStrong,
+    alignSelf: 'stretch',
+    color: colors.teal,
+    fontFamily: fontFamilies.body,
     fontSize: 15,
     fontWeight: '600',
+    lineHeight: 20,
+    minHeight: 44,
+    paddingVertical: 12,
     textAlign: 'center'
   }
 });
