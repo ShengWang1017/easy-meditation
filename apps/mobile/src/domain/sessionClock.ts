@@ -14,6 +14,7 @@ export type SessionClock = {
   start: () => void;
   pause: () => void;
   resume: () => void;
+  freeze: () => SessionClockSnapshot;
   snapshot: () => SessionClockSnapshot;
 };
 
@@ -23,24 +24,26 @@ export function createSessionClock(
   now: () => number = () => Date.now()
 ): SessionClock {
   let status: SessionStatus = 'idle';
-  let elapsedBeforeRun = 0;
+  let elapsedBeforeRunMs = 0;
   let startedAt = 0;
+  const durationMs = Math.max(1, durationSeconds) * 1_000;
 
-  function getElapsedSeconds() {
+  function getElapsedMilliseconds() {
     if (status !== 'running') {
-      return elapsedBeforeRun;
+      return elapsedBeforeRunMs;
     }
 
-    return elapsedBeforeRun + Math.floor((now() - startedAt) / 1000);
+    return elapsedBeforeRunMs + Math.max(0, now() - startedAt);
   }
 
   function snapshot(): SessionClockSnapshot {
-    const elapsedSeconds = Math.min(durationSeconds, getElapsedSeconds());
+    const elapsedMilliseconds = Math.min(durationMs, getElapsedMilliseconds());
+    const elapsedSeconds = Math.floor(elapsedMilliseconds / 1_000);
     const phase = getSessionSnapshot(method, elapsedSeconds, durationSeconds);
 
     if (phase.isComplete && status === 'running') {
       status = 'completed';
-      elapsedBeforeRun = durationSeconds;
+      elapsedBeforeRunMs = durationMs;
     }
 
     return {
@@ -65,7 +68,7 @@ export function createSessionClock(
         return;
       }
 
-      elapsedBeforeRun = getElapsedSeconds();
+      elapsedBeforeRunMs = Math.min(durationMs, getElapsedMilliseconds());
       status = 'paused';
     },
     resume() {
@@ -75,6 +78,15 @@ export function createSessionClock(
 
       status = 'running';
       startedAt = now();
+    },
+    freeze() {
+      const current = snapshot();
+      if (status === 'running') {
+        elapsedBeforeRunMs = Math.min(durationMs, getElapsedMilliseconds());
+        status = 'paused';
+        return snapshot();
+      }
+      return current;
     },
     snapshot
   };

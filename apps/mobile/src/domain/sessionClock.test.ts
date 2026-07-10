@@ -96,4 +96,58 @@ describe('mobile session clock', () => {
       }
     });
   });
+
+  test('preserves sub-second wall time across pause and resume boundaries', () => {
+    let time = 0;
+    const clock = createSessionClock(getSeedMethod(0), 120, () => time);
+
+    clock.start();
+    time = 600;
+    clock.pause();
+    expect(clock.snapshot().elapsedSeconds).toBe(0);
+
+    time = 10_600;
+    clock.resume();
+    time = 11_000;
+
+    expect(clock.snapshot()).toMatchObject({
+      status: 'running',
+      elapsedSeconds: 1,
+      remainingSeconds: 119
+    });
+  });
+
+  test('freezes intentional endings at the 999ms and 1000ms persistence boundary', () => {
+    let time = 0;
+    const belowBoundary = createSessionClock(getSeedMethod(0), 120, () => time);
+    belowBoundary.start();
+    time = 999;
+    expect(belowBoundary.freeze()).toMatchObject({ status: 'paused', elapsedSeconds: 0 });
+    time = 30_000;
+    expect(belowBoundary.snapshot().elapsedSeconds).toBe(0);
+
+    time = 0;
+    const atBoundary = createSessionClock(getSeedMethod(0), 120, () => time);
+    atBoundary.start();
+    time = 1_000;
+    expect(atBoundary.freeze()).toMatchObject({ status: 'paused', elapsedSeconds: 1 });
+    time = 30_000;
+    expect(atBoundary.snapshot().elapsedSeconds).toBe(1);
+  });
+
+  test('uses wall time after a long background jump and freezes natural completion', () => {
+    let time = 1_000;
+    const clock = createSessionClock(getSeedMethod(0), 3, () => time);
+    clock.start();
+    time = 9_000;
+
+    expect(clock.snapshot()).toMatchObject({
+      status: 'completed',
+      elapsedSeconds: 3,
+      remainingSeconds: 0
+    });
+
+    time = 90_000;
+    expect(clock.snapshot()).toMatchObject({ status: 'completed', elapsedSeconds: 3 });
+  });
 });

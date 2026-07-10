@@ -141,6 +141,42 @@ describe('useSessionAudio', () => {
     view.unmount();
   });
 
+  it('resets cue and session-availability state for replay without changing the preference', async () => {
+    const failingInhale = player({
+      seekTo: jest.fn(async () => {
+        throw new Error('temporarily unavailable');
+      })
+    });
+    const players = enqueuePlayers({ inhale: failingInhale });
+    const setPreferenceEnabled = jest.fn(async () => undefined);
+    render(
+      <HookProbe
+        id="session"
+        preferenceEnabled
+        setPreferenceEnabled={setPreferenceEnabled}
+      />
+    );
+
+    await act(async () => latest.get('session')!.play('inhale', 0, 0));
+    await waitFor(() => expect(latest.get('session')).toMatchObject({ enabled: false }));
+
+    failingInhale.seekTo.mockResolvedValue(undefined);
+    act(() => latest.get('session')!.resetForReplay());
+
+    expect(latest.get('session')).toMatchObject({ enabled: true, note: null });
+    await act(async () => {
+      await latest.get('session')!.play('inhale', 0, 0);
+      await latest.get('session')!.play('complete');
+      latest.get('session')!.resetForReplay();
+      await latest.get('session')!.play('inhale', 0, 0);
+      await latest.get('session')!.play('complete');
+    });
+
+    expect(players.inhale.play).toHaveBeenCalledTimes(2);
+    expect(players.complete.play).toHaveBeenCalledTimes(2);
+    expect(setPreferenceEnabled).not.toHaveBeenCalled();
+  });
+
   it.each(['seek', 'play'] as const)(
     '%s failure disables only the current hook without changing the stored preference',
     async (failure) => {

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Redirect, Slot, useSegments } from 'expo-router';
+import { Redirect, Slot, Stack, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -65,7 +65,16 @@ function RootNavigator() {
 
   return (
     <AuthSessionBoundary>
-      <Slot />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen
+          name="session/[methodId]"
+          options={{
+            headerShown: false,
+            gestureEnabled: false,
+            headerBackButtonMenuEnabled: false
+          }}
+        />
+      </Stack>
     </AuthSessionBoundary>
   );
 }

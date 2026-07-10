@@ -70,10 +70,14 @@ jest.mock('../query/client', () => {
 jest.mock('expo-router', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
+  const Stack = () => mockRouterState.renderSlot();
+  Stack.Screen = () => null;
+
   return {
     Redirect: ({ href }: { href: string }) =>
       React.createElement(Text, { testID: 'root-redirect' }, href),
     Slot: () => mockRouterState.renderSlot(),
+    Stack,
     useSegments: () => mockRouterState.segments
   };
 });

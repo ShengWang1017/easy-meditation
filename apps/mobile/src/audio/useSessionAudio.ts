@@ -18,6 +18,7 @@ export type UseSessionAudioResult = {
   enabled: boolean;
   note: string | null;
   toggle(): Promise<void>;
+  resetForReplay(): void;
   play(
     kind: SessionCueKind,
     cycleIndex?: number,
@@ -58,6 +59,12 @@ export function useSessionAudio({
     await setPreferenceEnabled(!preferenceEnabled);
   }, [preferenceEnabled, setPreferenceEnabled]);
 
+  const resetForReplay = useCallback(() => {
+    playedKeys.current.clear();
+    setSessionAvailable(true);
+    setNote(null);
+  }, []);
+
   const play = useCallback(
     async (
       kind: SessionCueKind,
@@ -89,5 +96,5 @@ export function useSessionAudio({
     [controller, enabled]
   );
 
-  return { enabled, note, toggle, play };
+  return { enabled, note, toggle, resetForReplay, play };
 }

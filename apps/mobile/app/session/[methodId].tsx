@@ -1,402 +1,465 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocalSearchParams, router } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Crypto from 'expo-crypto';
-import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo } from 'react';
+import type { BreathingMethod } from '@easy-meditation/shared';
 import { secondsToTimerLabel } from '@easy-meditation/shared';
+import { useNavigation } from '@react-navigation/native';
+import { useQuery } from '@tanstack/react-query';
+import { router, useLocalSearchParams } from 'expo-router';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
+
 import { fetchBreathingMethods } from '../../src/api/methods';
-import {
-  buildCompletedPracticeSessionInput,
-  createPracticeSession
-} from '../../src/api/sessions';
-import { BreathingOrb } from '../../src/components/BreathingOrb';
+import { useSessionAudio } from '../../src/audio/useSessionAudio';
 import { useAuthSession } from '../../src/auth/AuthSessionBoundary';
-import { Screen } from '../../src/components/Screen';
-import type { SessionClockSnapshot } from '../../src/domain/sessionClock';
-import { createSessionClock } from '../../src/domain/sessionClock';
-import { publicQueryKeys, userQueryKeys } from '../../src/query/keys';
-import { colors, methodTint, radii, spacing } from '../../src/theme/tokens';
+import { AppText } from '../../src/components/AppText';
+import { BreathingCanvas } from '../../src/components/BreathingCanvas';
+import { InlineState } from '../../src/components/InlineState';
+import { PrototypeButton } from '../../src/components/PrototypeButton';
+import { PrototypeIconButton } from '../../src/components/PrototypeIconButton';
+import { PrototypeScreen } from '../../src/components/PrototypeScreen';
+import { SessionExitDialog } from '../../src/components/SessionExitDialog';
+import { toCustomBreathingMethod } from '../../src/domain/customRhythm';
+import {
+  getMethodDisplayTitle,
+  type BuiltInMethodId
+} from '../../src/domain/methodPresentation';
+import type { LocalSessionLedgerEntry } from '../../src/domain/sessionLedger';
+import type { ResolvedSessionMethod } from '../../src/domain/sessionRecord';
+import { useFocusSession } from '../../src/hooks/useFocusSession';
+import { useSessionExitGuard } from '../../src/hooks/useSessionExitGuard';
+import { publicQueryKeys } from '../../src/query/keys';
+import { usePreferencesStore } from '../../src/store/PreferencesStoreProvider';
+import { referenceImages, referenceSoundIcons } from '../../src/theme/assets';
+import { colors, layout, radii, spacing } from '../../src/theme/tokens';
 
-function orbScaleFor(snapshot: SessionClockSnapshot): number {
-  if (snapshot.status !== 'running') {
-    return 0.82;
-  }
+const BUILT_IN_IDS = new Set<BuiltInMethodId>([
+  'box',
+  'four-seven-eight',
+  'coherent'
+]);
 
-  const progress = Math.max(0, Math.min(1, snapshot.phase.phaseProgress));
-  switch (snapshot.phase.kind) {
-    case 'inhale':
-      return 0.72 + 0.3 * progress;
-    case 'exhale':
-      return 1.02 - 0.3 * progress;
-    case 'hold':
-      return 1.02;
-    default:
-      return 0.85;
-  }
-}
+type SessionMethodBundle = {
+  resolved: ResolvedSessionMethod;
+  clockMethod: BreathingMethod;
+  rhythmLabel: string;
+};
 
 export default function SessionScreen() {
-  const { methodId } = useLocalSearchParams<{ methodId: string }>();
-  const { userId } = useAuthSession();
-  const queryClient = useQueryClient();
+  const params = useLocalSearchParams<{
+    methodId?: string | string[];
+  }>();
+  const routeMethodId = Array.isArray(params.methodId)
+    ? params.methodId[0]
+    : params.methodId;
+  const customRhythm = usePreferencesStore((state) => state.customRhythm);
+  const durationOverrides = usePreferencesStore(
+    (state) => state.durationOverrides
+  );
   const methodsQuery = useQuery({
     queryKey: publicQueryKeys.methods,
-    queryFn: fetchBreathingMethods
+    queryFn: fetchBreathingMethods,
+    enabled: routeMethodId !== 'custom'
   });
-  const method = methodsQuery.data?.find((item) => item.id === methodId);
-  const clock = useMemo(() => {
-    if (!method) {
+  const bundle = useMemo<SessionMethodBundle | null>(() => {
+    if (routeMethodId === 'custom') {
+      const clockMethod = toCustomBreathingMethod(customRhythm);
+      return {
+        clockMethod,
+        resolved: {
+          id: 'custom',
+          title: '自定义',
+          phases: clockMethod.phases,
+          plannedDurationSeconds: customRhythm.durationMinutes * 60,
+          origin: 'custom'
+        },
+        rhythmLabel: `${customRhythm.inhaleSeconds}-${customRhythm.holdSeconds}-${customRhythm.exhaleSeconds}`
+      };
+    }
+
+    if (!routeMethodId || !BUILT_IN_IDS.has(routeMethodId as BuiltInMethodId)) {
       return null;
     }
+    const id = routeMethodId as BuiltInMethodId;
+    const clockMethod = methodsQuery.data?.find((method) => method.id === id);
+    if (!clockMethod) return null;
+    const durationMinutes =
+      durationOverrides[id] ?? clockMethod.defaultDurationSeconds / 60;
+    return {
+      clockMethod,
+      resolved: {
+        id,
+        title: getMethodDisplayTitle(id) ?? clockMethod.title,
+        phases: clockMethod.phases,
+        plannedDurationSeconds: durationMinutes * 60,
+        origin: 'built_in'
+      },
+      rhythmLabel: clockMethod.phases
+        .map((phase) => phase.durationSeconds)
+        .join('-')
+    };
+  }, [customRhythm, durationOverrides, methodsQuery.data, routeMethodId]);
 
-    return createSessionClock(method, method.defaultDurationSeconds);
-  }, [method?.defaultDurationSeconds, method?.id]);
-  const [snapshot, setSnapshot] = useState<SessionClockSnapshot | null>(null);
-  const activeSnapshot = snapshot ?? (clock ? clock.snapshot() : null);
-  const startedAtRef = useRef<string | null>(null);
-  const clientSessionIdRef = useRef(Crypto.randomUUID());
-  const submittedRef = useRef(false);
-  const submitSessionMutation = useMutation({
-    mutationFn: createPracticeSession,
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: userQueryKeys.stats(userId) }),
-        queryClient.invalidateQueries({ queryKey: userQueryKeys.sessions(userId) })
-      ]);
-    }
-  });
-
-  useEffect(() => {
-    startedAtRef.current = null;
-    clientSessionIdRef.current = Crypto.randomUUID();
-    submittedRef.current = false;
-  }, [method?.id]);
-
-  useEffect(() => {
-    if (!clock) {
-      setSnapshot(null);
-      return;
-    }
-
-    setSnapshot(clock.snapshot());
-  }, [clock]);
-
-  useEffect(() => {
-    if (!clock || activeSnapshot?.status !== 'running') {
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setSnapshot(clock.snapshot());
-    }, 250);
-
-    return () => clearInterval(timer);
-  }, [activeSnapshot?.status, clock]);
-
-  useEffect(() => {
-    if (!method || !activeSnapshot || activeSnapshot.status !== 'completed' || submittedRef.current) {
-      return;
-    }
-
-    submittedRef.current = true;
-
-    const endedAt = new Date().toISOString();
-    const startedAt =
-      startedAtRef.current ??
-      new Date(Date.now() - activeSnapshot.elapsedSeconds * 1_000).toISOString();
-
-    void submitSessionMutation.mutateAsync(
-      buildCompletedPracticeSessionInput({
-        clientSessionId: clientSessionIdRef.current,
-        method,
-        actualDurationSeconds: activeSnapshot.elapsedSeconds,
-        startedAt,
-        endedAt
-      })
-    );
-  }, [activeSnapshot, method, submitSessionMutation]);
-
-  if (methodsQuery.isLoading && !method) {
+  if (
+    routeMethodId !== 'custom' &&
+    methodsQuery.isPending &&
+    !methodsQuery.data
+  ) {
     return (
-      <Screen>
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.accentStrong} size="large" />
-          <Text style={styles.helperText}>正在准备练习...</Text>
-        </View>
-      </Screen>
+      <FocusState>
+        <InlineState kind="loading" message="正在准备练习…" />
+      </FocusState>
     );
   }
 
-  if (!method || !clock) {
-    if (methodsQuery.isError) {
-      return (
-        <Screen>
-          <View style={styles.center}>
-            <Text style={styles.title}>暂时无法加载练习</Text>
-            <Text style={styles.helperText}>请检查网络后再试一次。</Text>
-            <ActionButton label="返回练习页" onPress={() => router.replace('/(tabs)/practice')} />
-          </View>
-        </Screen>
-      );
-    }
-
+  if (!bundle) {
+    const loadFailure = routeMethodId !== 'custom' && methodsQuery.isError;
     return (
-      <Screen>
-        <View style={styles.center}>
-          <Text style={styles.title}>没有找到这项练习</Text>
-          <Text style={styles.helperText}>请回到练习页重新选择一种方法。</Text>
-          <ActionButton label="返回练习页" onPress={() => router.replace('/(tabs)/practice')} />
-        </View>
-      </Screen>
+      <FocusState>
+        <InlineState
+          actionLabel="返回练习页"
+          kind="error"
+          message={
+            loadFailure
+              ? '请检查网络后再试一次。'
+              : '请回到练习页重新选择一种方法。'
+          }
+          onAction={() => router.replace('/(tabs)/practice')}
+          title={loadFailure ? '暂时无法加载练习' : '没有找到这项练习'}
+        />
+      </FocusState>
     );
-  }
-
-  if (!activeSnapshot) {
-    return (
-      <Screen>
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.accentStrong} size="large" />
-          <Text style={styles.helperText}>正在准备练习...</Text>
-        </View>
-      </Screen>
-    );
-  }
-
-  const activeClock = clock;
-
-  function handleStart() {
-    startedAtRef.current = new Date().toISOString();
-    activeClock.start();
-    setSnapshot(activeClock.snapshot());
-  }
-
-  function handlePause() {
-    activeClock.pause();
-    setSnapshot(activeClock.snapshot());
-  }
-
-  function handleResume() {
-    activeClock.resume();
-    setSnapshot(activeClock.snapshot());
   }
 
   return (
-    <Screen>
-      <View style={styles.content}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="返回"
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={styles.backButton}
-        >
-          <Ionicons name="chevron-back" size={26} color={colors.ink} />
-        </Pressable>
-
-        <View style={styles.header}>
-          <Text style={styles.methodTitle}>{method.title}</Text>
-          <Text style={styles.methodSubtitle}>{method.subtitle}</Text>
-        </View>
-
-        <View style={styles.timerPanel}>
-          <Text style={styles.phaseLabel}>{activeSnapshot.phase.label}</Text>
-          <Text style={styles.phaseCountdown}>{activeSnapshot.phase.remainingInPhase} 秒</Text>
-          <BreathingOrb
-            scaleTarget={orbScaleFor(activeSnapshot)}
-            active={activeSnapshot.status === 'running'}
-            glow={methodTint(method.id).glow}
-          />
-          <Text style={styles.totalTimer}>
-            {secondsToTimerLabel(activeSnapshot.remainingSeconds)}
-          </Text>
-          <Text style={styles.progressText}>
-            已练习 {secondsToTimerLabel(activeSnapshot.elapsedSeconds)}
-          </Text>
-          {activeSnapshot.status === 'completed' ? (
-            <Text
-              style={[
-                styles.submitStatus,
-                submitSessionMutation.isError ? styles.submitStatusError : null
-              ]}
-            >
-              {submitSessionMutation.isPending
-                ? '正在同步练习记录...'
-                : submitSessionMutation.isSuccess
-                  ? '练习记录已保存'
-                  : submitSessionMutation.isError
-                    ? '练习已完成，记录提交失败'
-                    : '练习已完成'}
-            </Text>
-          ) : null}
-        </View>
-
-        <View style={styles.actions}>
-          {activeSnapshot.status === 'idle' ? (
-            <ActionButton label="开始练习" onPress={handleStart} />
-          ) : null}
-          {activeSnapshot.status === 'running' ? (
-            <ActionButton label="暂停" onPress={handlePause} />
-          ) : null}
-          {activeSnapshot.status === 'paused' ? (
-            <ActionButton label="继续" onPress={handleResume} />
-          ) : null}
-          {activeSnapshot.status === 'completed' ? (
-            <ActionButton label="完成" onPress={() => router.replace('/(tabs)/practice')} />
-          ) : null}
-          <ActionButton
-            label={activeSnapshot.status === 'completed' ? '回到练习页' : '结束并返回'}
-            onPress={() => router.back()}
-            tone="secondary"
-          />
-        </View>
-      </View>
-    </Screen>
+    <FocusSessionView
+      bundle={bundle}
+      key={routeMethodId}
+    />
   );
 }
 
-type ActionButtonProps = {
-  label: string;
-  onPress: () => void;
-  tone?: 'primary' | 'secondary';
-};
-
-function ActionButton({ label, onPress, tone = 'primary' }: ActionButtonProps) {
+function FocusState({ children }: { children: React.ReactNode }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.button,
-        tone === 'secondary' ? styles.secondaryButton : styles.primaryButton,
-        pressed ? styles.buttonPressed : null
-      ]}
+    <PrototypeScreen
+      backgroundVariant="focus"
+      contentStyle={styles.centerState}
+      testID="focus-screen"
     >
-      <Text
-        style={[
-          styles.buttonText,
-          tone === 'secondary' ? styles.secondaryButtonText : styles.primaryButtonText
-        ]}
+      {children}
+    </PrototypeScreen>
+  );
+}
+
+function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
+  const navigation = useNavigation();
+  const reducedMotion = useReducedMotion();
+  const { preferencesStore, sessionOutbox } = useAuthSession();
+  const soundEnabled = usePreferencesStore((state) => state.soundEnabled);
+  const setSoundEnabled = usePreferencesStore((state) => state.setSoundEnabled);
+  const putLedgerEntry = useCallback(
+    (entry: LocalSessionLedgerEntry) =>
+      preferencesStore.getState().putLedgerEntry(entry),
+    [preferencesStore]
+  );
+  const audio = useSessionAudio({
+    preferenceEnabled: soundEnabled,
+    setPreferenceEnabled: setSoundEnabled
+  });
+  const controller = useFocusSession({
+    method: bundle.resolved,
+    clockMethod: bundle.clockMethod,
+    putLedgerEntry,
+    outbox: sessionOutbox,
+    audio
+  });
+  const exitGuard = useSessionExitGuard({
+    snapshot: controller.snapshot,
+    controlsUnlocked: controller.controlsUnlocked,
+    isPersisting: controller.isPersisting,
+    persistenceError: controller.persistenceError,
+    persistIntentionalEnd: controller.persistIntentionalEnd,
+    retryPersistence: controller.retryPersistence,
+    navigation
+  });
+  const { snapshot } = controller;
+  const isReady = snapshot.status === 'idle';
+  const isCompleted = snapshot.status === 'completed';
+  const phase = bundle.resolved.phases[snapshot.phase.phaseIndex];
+  const phaseDurationMs = (phase?.durationSeconds ?? 1) * 1_000;
+  const durationMinutes = bundle.resolved.plannedDurationSeconds / 60;
+  const SoundIcon = audio.enabled
+    ? referenceSoundIcons.on
+    : referenceSoundIcons.off;
+
+  return (
+    <PrototypeScreen
+      backgroundVariant="focus"
+      contentStyle={styles.screenContent}
+      testID="focus-screen"
+    >
+      <View
+        accessibilityLabel={bundle.resolved.title}
+        style={styles.session}
+        testID="focus-session"
       >
-        {label}
-      </Text>
-    </Pressable>
+        {isReady ? (
+          <PrototypeIconButton
+            accessibilityLabel="返回"
+            onPress={() => navigation.goBack()}
+            source={referenceImages.back}
+            style={styles.backButton}
+          />
+        ) : null}
+
+        <Pressable
+          accessibilityLabel={audio.enabled ? '关闭声音' : '打开声音'}
+          accessibilityRole="button"
+          accessibilityState={{ checked: audio.enabled }}
+          hitSlop={8}
+          onPress={() => void audio.toggle().catch(() => undefined)}
+          style={[styles.soundButton, audio.enabled ? null : styles.soundMuted]}
+        >
+          <SoundIcon height={30} width={30} />
+        </Pressable>
+
+        <View style={styles.phaseReadout}>
+          <AppText
+            accessibilityLiveRegion={isReady ? undefined : 'polite'}
+            style={styles.phaseLabel}
+            variant="displayHero"
+          >
+            {isReady ? '准备' : isCompleted ? '完成' : snapshot.phase.label}
+          </AppText>
+          {isReady ? (
+            <AppText style={styles.rhythmLabel}>{bundle.rhythmLabel}</AppText>
+          ) : isCompleted ? null : (
+            <AppText systemFont style={styles.phaseCount}>
+              {snapshot.phase.remainingInPhase}
+            </AppText>
+          )}
+        </View>
+
+        <View style={styles.stage}>
+          <BreathingCanvas
+            phaseDurationMs={phaseDurationMs}
+            phaseIndex={snapshot.phase.phaseIndex}
+            phaseKind={snapshot.phase.kind}
+            phaseProgress={snapshot.phase.phaseProgress}
+            phases={bundle.resolved.phases}
+            reducedMotion={reducedMotion}
+            status={snapshot.status}
+          />
+        </View>
+
+        <View style={styles.timerBlock}>
+          <AppText systemFont style={styles.timerValue} variant="timer">
+            {isReady
+              ? `${durationMinutes} 分钟`
+              : isCompleted
+                ? '完成'
+                : secondsToTimerLabel(snapshot.remainingSeconds)}
+          </AppText>
+          <AppText numberOfLines={1} style={styles.timerTitle} tone="muted">
+            {bundle.resolved.title}
+          </AppText>
+        </View>
+
+        {audio.note ? (
+          <AppText accessibilityLiveRegion="polite" style={styles.note} tone="muted">
+            {audio.note}
+          </AppText>
+        ) : null}
+        {controller.persistenceError ? (
+          <View style={styles.persistenceError}>
+            <AppText accessibilityLiveRegion="assertive" tone="danger">
+              {controller.persistenceError}
+            </AppText>
+            <PrototypeButton
+              label="重试保存"
+              loading={controller.isPersisting}
+              onPress={() => void controller.retryPersistence().catch(() => undefined)}
+              variant="quiet"
+            />
+          </View>
+        ) : null}
+
+        <View style={styles.actions}>
+          {isReady ? (
+            <PrototypeButton
+              label="开始"
+              onPress={controller.start}
+              style={styles.startButton}
+              variant="quiet"
+            />
+          ) : (
+            <>
+              <PrototypeButton
+                disabled={isCompleted && !controller.controlsUnlocked}
+                label={
+                  isCompleted
+                    ? '再来一次'
+                    : snapshot.status === 'running'
+                      ? '暂停'
+                      : '继续'
+                }
+                loading={isCompleted && controller.isPersisting}
+                onPress={
+                  isCompleted
+                    ? () => void controller.replay()
+                    : snapshot.status === 'running'
+                      ? controller.pause
+                      : controller.resume
+                }
+                style={styles.primaryAction}
+                variant="quiet"
+              />
+              <PrototypeButton
+                disabled={isCompleted && !controller.controlsUnlocked}
+                label="结束训练"
+                onPress={() => void exitGuard.requestExplicitEnd().catch(() => undefined)}
+                style={styles.endAction}
+                variant="quiet"
+              />
+            </>
+          )}
+        </View>
+      </View>
+
+      <SessionExitDialog
+        error={controller.persistenceError}
+        isPersisting={controller.isPersisting}
+        onContinue={exitGuard.continueSession}
+        onEnd={() => void exitGuard.endAndLeave().catch(() => undefined)}
+        onRetry={() => void exitGuard.retryAndLeave().catch(() => undefined)}
+        visible={exitGuard.dialogVisible}
+      />
+    </PrototypeScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    flex: 1,
-    justifyContent: 'space-between',
-    gap: spacing.xl
+  screenContent: {
+    overflow: 'hidden',
+    paddingHorizontal: 0
   },
-  center: {
+  session: {
+    alignItems: 'center',
     flex: 1,
+    paddingBottom: 24,
+    paddingHorizontal: layout.compactScreenGutter,
+    paddingTop: 62,
+    position: 'relative'
+  },
+  centerState: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md
+    paddingVertical: spacing.xl
   },
-  header: {
-    gap: spacing.sm
+  backButton: {
+    left: 18,
+    position: 'absolute',
+    top: 18
   },
-  methodTitle: {
-    color: colors.ink,
-    fontSize: 30,
-    fontWeight: '700',
-    textAlign: 'center'
-  },
-  methodSubtitle: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center'
-  },
-  timerPanel: {
-    flex: 1,
+  soundButton: {
     alignItems: 'center',
+    height: layout.touchTarget,
     justifyContent: 'center',
-    gap: spacing.md
+    minHeight: layout.touchTarget,
+    minWidth: layout.touchTarget,
+    position: 'absolute',
+    right: 18,
+    top: 54,
+    width: layout.touchTarget,
+    zIndex: 2
+  },
+  soundMuted: {
+    opacity: 0.58
+  },
+  phaseReadout: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    justifyContent: 'center',
+    marginTop: 46,
+    minHeight: 82
   },
   phaseLabel: {
     color: colors.ink,
-    fontSize: 42,
-    fontWeight: '700'
-  },
-  phaseCountdown: {
-    color: colors.muted,
-    fontSize: 20
-  },
-  backButton: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    zIndex: 10,
-    width: 40,
-    height: 40,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.7)'
-  },
-  totalTimer: {
-    color: colors.ink,
-    fontSize: 40,
-    fontWeight: '700'
-  },
-  progressText: {
-    color: colors.muted,
-    fontSize: 15
-  },
-  submitStatus: {
-    color: colors.accentStrong,
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 34,
+    fontWeight: '500',
+    lineHeight: 38,
     textAlign: 'center'
   },
-  submitStatusError: {
-    color: '#b75b52'
+  rhythmLabel: {
+    color: 'rgba(34, 39, 47, 0.58)',
+    fontSize: 18,
+    lineHeight: 22
+  },
+  phaseCount: {
+    color: 'rgba(34, 39, 47, 0.72)',
+    fontSize: 25,
+    lineHeight: 28,
+    fontVariant: ['tabular-nums']
+  },
+  stage: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 326,
+    paddingBottom: 8,
+    width: '100%'
+  },
+  timerBlock: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: 20
+  },
+  timerValue: {
+    color: colors.ink,
+    fontSize: 32,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
+    lineHeight: 36
+  },
+  timerTitle: {
+    fontSize: 15,
+    maxWidth: '100%'
+  },
+  note: {
+    fontSize: 12,
+    marginBottom: spacing.xs,
+    textAlign: 'center'
+  },
+  persistenceError: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm
   },
   actions: {
-    gap: spacing.md
+    alignItems: 'stretch',
+    gap: spacing.sm,
+    maxWidth: 300,
+    width: '100%'
   },
-  title: {
-    color: colors.ink,
-    fontSize: 26,
-    fontWeight: '700',
-    textAlign: 'center'
+  startButton: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(222, 222, 237, 0.72)',
+    borderRadius: 29,
+    minHeight: 58,
+    width: 260
   },
-  helperText: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center'
-  },
-  button: {
-    minHeight: 52,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg
-  },
-  primaryButton: {
-    backgroundColor: colors.accentStrong
-  },
-  secondaryButton: {
-    backgroundColor: colors.surfaceStrong,
+  primaryAction: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.46)',
+    borderColor: 'rgba(255, 255, 255, 0.58)',
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: colors.tabBorder
+    minHeight: layout.touchTarget,
+    paddingHorizontal: 22
   },
-  buttonPressed: {
-    opacity: 0.85
-  },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '700'
-  },
-  primaryButtonText: {
-    color: colors.surfaceStrong
-  },
-  secondaryButtonText: {
-    color: colors.ink
+  endAction: {
+    backgroundColor: 'rgba(222, 222, 237, 0.76)',
+    borderColor: 'rgba(255, 255, 255, 0.42)',
+    borderRadius: 36,
+    borderWidth: 1,
+    minHeight: 58
   }
 });
