@@ -1,7 +1,7 @@
 import React from 'react';
 import { jest } from '@jest/globals';
 import { FlatList, Image, StyleSheet } from 'react-native';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import type { StateStorage } from 'zustand/middleware';
 
 let mockHasBackEntry = true;
@@ -364,10 +364,12 @@ describe('CustomRhythmScreen', () => {
     );
     const firstView = await renderCustom(store);
 
-    fireEvent(firstView.getByTestId('custom-inhale-wheel-list'), 'momentumScrollEnd', {
-      nativeEvent: { contentOffset: { x: 0, y: 4 * 56 } }
+    await act(async () => {
+      fireEvent(firstView.getByTestId('custom-inhale-wheel-list'), 'momentumScrollEnd', {
+        nativeEvent: { contentOffset: { x: 0, y: 4 * 56 } }
+      });
+      await controlledStorage.firstWriteStarted;
     });
-    await controlledStorage.firstWriteStarted;
     firstView.unmount();
 
     const secondView = renderWithProviders(
@@ -378,7 +380,10 @@ describe('CustomRhythmScreen', () => {
     fireEvent(secondView.getByTestId('custom-inhale-wheel-list'), 'momentumScrollEnd', {
       nativeEvent: { contentOffset: { x: 0, y: 5 * 56 } }
     });
-    controlledStorage.rejectFirstWrite(new Error('first write failed'));
+    await act(async () => {
+      controlledStorage.rejectFirstWrite(new Error('first write failed'));
+      await store.getState().waitForCustomRhythmSave();
+    });
 
     await waitFor(() => expect(controlledStorage.setItem).toHaveBeenCalledTimes(3));
     expect(controlledStorage.writes.map(persistedInhaleSeconds)).toEqual([5, 4, 6]);
@@ -400,16 +405,21 @@ describe('CustomRhythmScreen', () => {
     );
     const view = await renderCustom(store);
 
-    fireEvent(
-      view.getByRole('adjustable', { name: '设置吸气秒数' }),
-      'accessibilityAction',
-      { nativeEvent: { actionName: 'increment' } }
-    );
-    await controlledStorage.firstWriteStarted;
+    await act(async () => {
+      fireEvent(
+        view.getByRole('adjustable', { name: '设置吸气秒数' }),
+        'accessibilityAction',
+        { nativeEvent: { actionName: 'increment' } }
+      );
+      await controlledStorage.firstWriteStarted;
+    });
     fireEvent.press(view.getByRole('button', { name: action }));
 
     expect(mockRouter[expected]).not.toHaveBeenCalled();
-    controlledStorage.resolveFirstWrite();
+    await act(async () => {
+      controlledStorage.resolveFirstWrite();
+      await store.getState().waitForCustomRhythmSave();
+    });
     await waitFor(() => expect(mockRouter[expected]).toHaveBeenCalledTimes(1));
   });
 
@@ -423,14 +433,19 @@ describe('CustomRhythmScreen', () => {
     );
     const view = await renderCustom(store);
 
-    fireEvent(
-      view.getByRole('adjustable', { name: '设置吸气秒数' }),
-      'accessibilityAction',
-      { nativeEvent: { actionName: 'increment' } }
-    );
-    await controlledStorage.firstWriteStarted;
+    await act(async () => {
+      fireEvent(
+        view.getByRole('adjustable', { name: '设置吸气秒数' }),
+        'accessibilityAction',
+        { nativeEvent: { actionName: 'increment' } }
+      );
+      await controlledStorage.firstWriteStarted;
+    });
     fireEvent.press(view.getByRole('button', { name: '开始呼吸' }));
-    controlledStorage.rejectFirstWrite(new Error('first write failed'));
+    await act(async () => {
+      controlledStorage.rejectFirstWrite(new Error('first write failed'));
+      await store.getState().waitForCustomRhythmSave().catch(() => undefined);
+    });
 
     await waitFor(() =>
       expect(view.getByRole('alert', { name: '设置未保存，请重试。' })).toBeTruthy()
@@ -439,7 +454,10 @@ describe('CustomRhythmScreen', () => {
     expect(store.getState().customRhythm.inhaleSeconds).toBe(4);
     expect(mockRouter.push).not.toHaveBeenCalled();
 
-    fireEvent.press(view.getByRole('button', { name: '重试保存' }));
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: '重试保存' }));
+      await store.getState().waitForCustomRhythmSave();
+    });
     await waitFor(() =>
       expect(view.queryByRole('alert', { name: '设置未保存，请重试。' })).toBeNull()
     );
