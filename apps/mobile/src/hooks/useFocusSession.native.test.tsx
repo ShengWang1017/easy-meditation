@@ -304,8 +304,11 @@ describe('useFocusSession', () => {
     expect(view.audio.play).toHaveBeenCalledWith('complete');
   });
 
-  it('persists a natural completion when pause and end beat the refresh interval', async () => {
-    const view = harness();
+  it('automatically persists a natural completion when pause beats the refresh interval', async () => {
+    const write = deferred<void>();
+    const putLedgerEntry = jest.fn(() => write.promise);
+    const submit = jest.fn(async () => undefined);
+    const view = harness({ putLedgerEntry, outbox: { submit } });
     act(() => latest.start());
     nowMs += 2_000;
 
@@ -314,15 +317,24 @@ describe('useFocusSession', () => {
       status: 'completed',
       elapsedSeconds: 2
     });
-
-    await act(async () => latest.persistIntentionalEnd());
-
-    expect(view.putLedgerEntry).toHaveBeenCalledWith(
+    expect(latest).toMatchObject({
+      controlsUnlocked: false,
+      isPersisting: true
+    });
+    expect(putLedgerEntry).toHaveBeenCalledWith(
       expect.objectContaining({
         completed: true,
         actualDurationSeconds: 2
       })
     );
+    expect(view.audio.play).toHaveBeenCalledWith('complete');
+    expect(submit).not.toHaveBeenCalled();
+
+    write.resolve();
+    await waitFor(() => {
+      expect(latest.controlsUnlocked).toBe(true);
+      expect(submit).toHaveBeenCalledWith(IDS[0]);
+    });
   });
 
   it('replays once with fresh identity, clock, timestamp, and cue state', async () => {

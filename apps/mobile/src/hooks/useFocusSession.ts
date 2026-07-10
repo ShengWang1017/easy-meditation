@@ -270,8 +270,8 @@ export function useFocusSession(
       return;
     }
     clockRef.current!.pause();
-    publishSnapshot(clockRef.current!.snapshot());
-  }, [publishSnapshot]);
+    refresh();
+  }, [refresh]);
 
   const resume = useCallback(() => {
     if (!controlsUnlockedRef.current || snapshotRef.current.status !== 'paused') {
