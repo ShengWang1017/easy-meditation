@@ -20,6 +20,16 @@ function player() {
   return { events, port };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('createCuePlaybackController', () => {
   it('seeks to the beginning before every play', async () => {
     const kinds: SessionCueKind[] = ['inhale', 'hold', 'exhale', 'complete'];
@@ -70,5 +80,30 @@ describe('createCuePlaybackController', () => {
     await expect(controller.play('inhale')).resolves.toBe(false);
     expect(seekFailure.play).not.toHaveBeenCalled();
     await expect(controller.play('hold')).resolves.toBe(false);
+  });
+
+  it('checks the run guard after seeking and before starting playback', async () => {
+    const seek = deferred<void>();
+    const inhale: CuePlayerPort = {
+      seekTo: vi.fn(() => seek.promise),
+      play: vi.fn()
+    };
+    const healthy = player().port;
+    const controller = createCuePlaybackController({
+      inhale,
+      hold: healthy,
+      exhale: healthy,
+      complete: healthy
+    });
+    let currentRun = true;
+    const guard = vi.fn(() => currentRun);
+
+    const playback = controller.play('inhale', guard);
+    currentRun = false;
+    seek.resolve();
+
+    await expect(playback).resolves.toBe(false);
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(inhale.play).not.toHaveBeenCalled();
   });
 });

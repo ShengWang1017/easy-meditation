@@ -36,15 +36,9 @@ export function createSessionClock(
     return elapsedBeforeRunMs + Math.max(0, now() - startedAt);
   }
 
-  function snapshot(): SessionClockSnapshot {
-    const elapsedMilliseconds = Math.min(durationMs, getElapsedMilliseconds());
+  function buildSnapshot(elapsedMilliseconds: number): SessionClockSnapshot {
     const elapsedSeconds = Math.floor(elapsedMilliseconds / 1_000);
     const phase = getSessionSnapshot(method, elapsedSeconds, durationSeconds);
-
-    if (phase.isComplete && status === 'running') {
-      status = 'completed';
-      elapsedBeforeRunMs = durationMs;
-    }
 
     return {
       status,
@@ -52,6 +46,28 @@ export function createSessionClock(
       remainingSeconds: phase.remainingInSession,
       phase
     };
+  }
+
+  function snapshot(): SessionClockSnapshot {
+    const elapsedMilliseconds = Math.min(durationMs, getElapsedMilliseconds());
+    if (status === 'running' && elapsedMilliseconds >= durationMs) {
+      status = 'completed';
+      elapsedBeforeRunMs = durationMs;
+      return buildSnapshot(durationMs);
+    }
+    return buildSnapshot(elapsedMilliseconds);
+  }
+
+  function stopRunning(): SessionClockSnapshot {
+    const elapsedMilliseconds = Math.min(durationMs, getElapsedMilliseconds());
+    if (elapsedMilliseconds >= durationMs) {
+      elapsedBeforeRunMs = durationMs;
+      status = 'completed';
+    } else {
+      elapsedBeforeRunMs = elapsedMilliseconds;
+      status = 'paused';
+    }
+    return buildSnapshot(elapsedBeforeRunMs);
   }
 
   return {
@@ -68,11 +84,7 @@ export function createSessionClock(
         return;
       }
 
-      if (snapshot().status === 'completed') {
-        return;
-      }
-      elapsedBeforeRunMs = Math.min(durationMs, getElapsedMilliseconds());
-      status = 'paused';
+      stopRunning();
     },
     resume() {
       if (status !== 'paused') {
@@ -83,13 +95,10 @@ export function createSessionClock(
       startedAt = now();
     },
     freeze() {
-      const current = snapshot();
       if (status === 'running') {
-        elapsedBeforeRunMs = Math.min(durationMs, getElapsedMilliseconds());
-        status = 'paused';
-        return snapshot();
+        return stopRunning();
       }
-      return current;
+      return snapshot();
     },
     snapshot
   };

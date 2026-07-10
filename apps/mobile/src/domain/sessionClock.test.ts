@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { BREATHING_METHODS_SEED } from '@easy-meditation/shared';
 import type { BreathingMethod } from '@easy-meditation/shared';
 import { createSessionClock } from './sessionClock';
@@ -166,5 +166,45 @@ describe('mobile session clock', () => {
       phase: { isComplete: true }
     });
     expect(clock.freeze()).toMatchObject({ status: 'completed' });
+  });
+
+  test('samples wall time once when pausing below the completion boundary', () => {
+    const now = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(1_999)
+      .mockReturnValueOnce(2_000);
+    const clock = createSessionClock(getSeedMethod(0), 2, now);
+
+    clock.start();
+    clock.pause();
+
+    expect(now).toHaveBeenCalledTimes(2);
+    expect(clock.snapshot()).toMatchObject({
+      status: 'paused',
+      elapsedSeconds: 1,
+      remainingSeconds: 1,
+      phase: { isComplete: false }
+    });
+  });
+
+  test('samples wall time once when freezing below the completion boundary', () => {
+    const now = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(1_999)
+      .mockReturnValueOnce(2_000);
+    const clock = createSessionClock(getSeedMethod(0), 2, now);
+
+    clock.start();
+    const frozen = clock.freeze();
+
+    expect(now).toHaveBeenCalledTimes(2);
+    expect(frozen).toMatchObject({
+      status: 'paused',
+      elapsedSeconds: 1,
+      remainingSeconds: 1,
+      phase: { isComplete: false }
+    });
   });
 });

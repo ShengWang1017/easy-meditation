@@ -36,6 +36,16 @@ function player(overrides: Partial<CuePlayerPort> = {}): MockPlayer {
   } as MockPlayer;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function enqueuePlayers(
   overrides: Partial<Record<SessionCueKind, MockPlayer>> = {}
 ): Record<SessionCueKind, MockPlayer> {
@@ -175,6 +185,64 @@ describe('useSessionAudio', () => {
     expect(players.inhale.play).toHaveBeenCalledTimes(2);
     expect(players.complete.play).toHaveBeenCalledTimes(2);
     expect(setPreferenceEnabled).not.toHaveBeenCalled();
+  });
+
+  it('invalidates a deferred seek so an old run cannot play after replay', async () => {
+    const seek = deferred<void>();
+    const inhale = player({
+      seekTo: jest
+        .fn<CuePlayerPort['seekTo']>()
+        .mockImplementationOnce(() => seek.promise)
+        .mockResolvedValue(undefined)
+    });
+    enqueuePlayers({ inhale });
+    render(
+      <HookProbe
+        id="session"
+        preferenceEnabled
+        setPreferenceEnabled={jest.fn(async () => undefined)}
+      />
+    );
+
+    let stalePlayback!: Promise<void>;
+    act(() => {
+      stalePlayback = latest.get('session')!.play('inhale', 0, 0);
+    });
+    act(() => latest.get('session')!.resetForReplay());
+    await act(async () => latest.get('session')!.play('inhale', 0, 0));
+    expect(inhale.play).toHaveBeenCalledTimes(1);
+
+    seek.resolve();
+    await act(async () => stalePlayback);
+
+    expect(inhale.play).toHaveBeenCalledTimes(1);
+    expect(latest.get('session')).toMatchObject({ enabled: true, note: null });
+  });
+
+  it('ignores a deferred failure from an old run after replay', async () => {
+    const seek = deferred<void>();
+    const inhale = player({
+      seekTo: jest.fn(() => seek.promise)
+    });
+    enqueuePlayers({ inhale });
+    render(
+      <HookProbe
+        id="session"
+        preferenceEnabled
+        setPreferenceEnabled={jest.fn(async () => undefined)}
+      />
+    );
+
+    let stalePlayback!: Promise<void>;
+    act(() => {
+      stalePlayback = latest.get('session')!.play('inhale', 0, 0);
+    });
+    act(() => latest.get('session')!.resetForReplay());
+    seek.reject(new Error('old run seek failed'));
+    await act(async () => stalePlayback);
+
+    expect(inhale.play).not.toHaveBeenCalled();
+    expect(latest.get('session')).toMatchObject({ enabled: true, note: null });
   });
 
   it.each(['seek', 'play'] as const)(

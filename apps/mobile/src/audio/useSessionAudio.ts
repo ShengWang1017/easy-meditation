@@ -51,6 +51,7 @@ export function useSessionAudio({
     [completePlayer, exhalePlayer, holdPlayer, inhalePlayer]
   );
   const playedKeys = useRef(new Set<string>());
+  const runGeneration = useRef(0);
   const [sessionAvailable, setSessionAvailable] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const enabled = preferenceEnabled && sessionAvailable;
@@ -60,6 +61,7 @@ export function useSessionAudio({
   }, [preferenceEnabled, setPreferenceEnabled]);
 
   const resetForReplay = useCallback(() => {
+    runGeneration.current += 1;
     playedKeys.current.clear();
     setSessionAvailable(true);
     setNote(null);
@@ -74,6 +76,7 @@ export function useSessionAudio({
       if (!enabled) {
         return;
       }
+      const generation = runGeneration.current;
 
       const key =
         kind === 'complete'
@@ -88,7 +91,12 @@ export function useSessionAudio({
         playedKeys.current.add(key);
       }
 
-      if (!(await controller.play(kind))) {
+      const played = await controller.play(
+        kind,
+        () => runGeneration.current === generation
+      );
+      if (runGeneration.current !== generation) return;
+      if (!played) {
         setSessionAvailable(false);
         setNote((current) => current ?? SESSION_AUDIO_UNAVAILABLE_NOTE);
       }

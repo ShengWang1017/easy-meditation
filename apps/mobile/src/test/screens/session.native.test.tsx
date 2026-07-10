@@ -10,6 +10,7 @@ const mockRouter = { back: jest.fn(), replace: jest.fn() };
 const mockNavigation = { dispatch: jest.fn(), goBack: jest.fn() };
 let mockSession: Record<string, unknown>;
 let mockFocusOptions: Record<string, unknown> | undefined;
+let mockFocusOptionsHistory: Record<string, unknown>[] = [];
 let mockExitOptions: Record<string, unknown> | undefined;
 
 const mockController = {
@@ -99,6 +100,7 @@ jest.mock('../../auth/AuthSessionBoundary', () => ({
 jest.mock('../../hooks/useFocusSession', () => ({
   useFocusSession: (options: Record<string, unknown>) => {
     mockFocusOptions = options;
+    mockFocusOptionsHistory.push(options);
     return mockController;
   }
 }), { virtual: true });
@@ -131,6 +133,7 @@ jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
 
 import SessionScreen from '../../../app/session/[methodId]';
 import { fetchBreathingMethods } from '../../api/methods';
+import { publicQueryKeys } from '../../query/keys';
 import { PreferencesStoreProvider } from '../../store/PreferencesStoreProvider';
 import {
   createUserPreferencesStore,
@@ -219,6 +222,7 @@ async function preferencesStore(): Promise<UserPreferencesStore> {
 }
 
 async function renderSession(options: {
+  cachedMethods?: BreathingMethod[];
   methodId?: string;
   methods?: BreathingMethod[];
   store?: UserPreferencesStore;
@@ -236,6 +240,9 @@ async function renderSession(options: {
   };
   fetchMethodsMock.mockResolvedValue(options.methods ?? [boxMethod]);
   const queryClient = createTestQueryClient();
+  if (options.cachedMethods) {
+    queryClient.setQueryData(publicQueryKeys.methods, options.cachedMethods);
+  }
   const view = renderWithProviders(
     <PreferencesStoreProvider store={store}>
       <SessionScreen />
@@ -250,6 +257,7 @@ describe('SessionScreen', () => {
     jest.clearAllMocks();
     fetchMethodsMock.mockReset();
     mockFocusOptions = undefined;
+    mockFocusOptionsHistory = [];
     mockExitOptions = undefined;
     mockController.snapshot = sessionSnapshot('idle');
     mockController.isPersisting = false;
@@ -319,6 +327,59 @@ describe('SessionScreen', () => {
     await waitFor(() => expect(view.getByText('5-0-5')).toBeTruthy());
     expect(view.queryByText('5-5')).toBeNull();
     expect(view.getByText('等量呼吸法')).toBeTruthy();
+  });
+
+  it('freezes the cached method bundle across query updates until a route remount', async () => {
+    const refreshedMethod: BreathingMethod = {
+      ...boxMethod,
+      title: 'API 刷新后的盒式呼吸',
+      defaultDurationSeconds: 600,
+      phases: [
+        { kind: 'inhale', label: '刷新吸气', durationSeconds: 8 },
+        { kind: 'hold', label: '刷新屏息', durationSeconds: 3 },
+        { kind: 'exhale', label: '刷新呼气', durationSeconds: 11 }
+      ]
+    };
+    const view = await renderSession({
+      cachedMethods: [boxMethod],
+      methods: [boxMethod]
+    });
+    expect(view.getByText('3 分钟')).toBeTruthy();
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+    const initialFocusOptions = mockFocusOptions;
+    const initialRenderCount = mockFocusOptionsHistory.length;
+
+    act(() => {
+      view.queryClient.setQueryData(publicQueryKeys.methods, [refreshedMethod]);
+    });
+    await waitFor(() =>
+      expect(mockFocusOptionsHistory.length).toBeGreaterThan(initialRenderCount)
+    );
+
+    expect(view.getByText('准备')).toBeTruthy();
+    expect(view.getByText('4-4-4-4')).toBeTruthy();
+    expect(view.getByText('3 分钟')).toBeTruthy();
+    expect(view.getByText('盒式呼吸法')).toBeTruthy();
+    expect(view.queryByText('10 分钟')).toBeNull();
+    expect(view.getByTestId('breathing-canvas').props).toMatchObject({
+      phaseDurationMs: 4_000,
+      phases: boxMethod.phases
+    });
+    expect(mockFocusOptions).toMatchObject({
+      method: initialFocusOptions?.method,
+      clockMethod: initialFocusOptions?.clockMethod
+    });
+
+    view.unmount();
+    const remounted = await renderSession({
+      cachedMethods: [refreshedMethod],
+      methods: [refreshedMethod]
+    });
+    expect(remounted.getByText('10 分钟')).toBeTruthy();
+    expect(remounted.getByTestId('breathing-canvas').props).toMatchObject({
+      phaseDurationMs: 8_000,
+      phases: refreshedMethod.phases
+    });
   });
 
   it('matches focus action typography while retaining minimum touch targets', async () => {

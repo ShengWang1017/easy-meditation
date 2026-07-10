@@ -6,17 +6,18 @@ export type CuePlayerPort = {
 };
 
 export type CuePlaybackController = {
-  play(kind: SessionCueKind): Promise<boolean>;
+  play(kind: SessionCueKind, guard?: () => boolean): Promise<boolean>;
 };
 
 export function createCuePlaybackController(
   players: Record<SessionCueKind, CuePlayerPort>
 ): CuePlaybackController {
   return {
-    async play(kind) {
+    async play(kind, guard = () => true) {
       try {
         const player = players[kind];
         await player.seekTo(0);
+        if (!guard()) return false;
         player.play();
         return true;
       } catch {

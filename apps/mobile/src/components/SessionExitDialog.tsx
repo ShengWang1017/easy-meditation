@@ -36,8 +36,8 @@ export function SessionExitDialog({
           style={StyleSheet.absoluteFill}
           testID="session-exit-backdrop"
         />
-        <View accessibilityRole="alert" accessible style={styles.card}>
-          <View style={styles.copy}>
+        <View style={styles.card}>
+          <View accessibilityRole="alert" accessible style={styles.copy}>
             <AppText variant="displaySection">要结束这次练习吗？</AppText>
             <AppText tone="muted">
               结束后会先把这次练习安全保存在本机，再带你离开。

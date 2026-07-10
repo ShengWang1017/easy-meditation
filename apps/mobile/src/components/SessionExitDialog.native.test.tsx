@@ -1,6 +1,10 @@
 import React from 'react';
 import { jest } from '@jest/globals';
-import { fireEvent, render } from '@testing-library/react-native';
+import {
+  fireEvent,
+  isHiddenFromAccessibility,
+  render
+} from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { layout } from '../theme/tokens';
@@ -24,6 +28,13 @@ describe('SessionExitDialog', () => {
     expect(view.getByText('要结束这次练习吗？')).toBeTruthy();
     const continueButton = view.getByRole('button', { name: '继续练习' });
     const endButton = view.getByRole('button', { name: '结束并离开' });
+    const alert = view.getByRole('alert');
+    expect(alert).toHaveAccessibleName(
+      /要结束这次练习吗？.*结束后会先把这次练习安全保存在本机，再带你离开。/
+    );
+    expect(alert.findAllByProps({ accessibilityRole: 'button' })).toHaveLength(0);
+    expect(isHiddenFromAccessibility(continueButton)).toBe(false);
+    expect(isHiddenFromAccessibility(endButton)).toBe(false);
     expect(StyleSheet.flatten(continueButton.props.style).minHeight).toBeGreaterThanOrEqual(
       layout.touchTarget
     );

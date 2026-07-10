@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { BreathingMethod } from '@easy-meditation/shared';
 import { secondsToTimerLabel } from '@easy-meditation/shared';
 import { useNavigation } from '@react-navigation/native';
@@ -42,6 +42,22 @@ type SessionMethodBundle = {
   clockMethod: BreathingMethod;
   rhythmLabel: string;
 };
+
+function snapshotSessionMethodBundle(
+  bundle: SessionMethodBundle
+): SessionMethodBundle {
+  return {
+    clockMethod: {
+      ...bundle.clockMethod,
+      phases: bundle.clockMethod.phases.map((phase) => ({ ...phase }))
+    },
+    resolved: {
+      ...bundle.resolved,
+      phases: bundle.resolved.phases.map((phase) => ({ ...phase }))
+    },
+    rhythmLabel: bundle.rhythmLabel
+  };
+}
 
 export default function SessionScreen() {
   const params = useLocalSearchParams<{
@@ -163,6 +179,11 @@ function FocusState({ children }: { children: React.ReactNode }) {
 }
 
 function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
+  const runBundleRef = useRef<SessionMethodBundle | null>(null);
+  if (runBundleRef.current === null) {
+    runBundleRef.current = snapshotSessionMethodBundle(bundle);
+  }
+  const runBundle = runBundleRef.current;
   const navigation = useNavigation();
   const reducedMotion = useReducedMotion();
   const { preferencesStore, sessionOutbox } = useAuthSession();
@@ -178,8 +199,8 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
     setPreferenceEnabled: setSoundEnabled
   });
   const controller = useFocusSession({
-    method: bundle.resolved,
-    clockMethod: bundle.clockMethod,
+    method: runBundle.resolved,
+    clockMethod: runBundle.clockMethod,
     putLedgerEntry,
     outbox: sessionOutbox,
     audio
@@ -196,9 +217,9 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
   const { snapshot } = controller;
   const isReady = snapshot.status === 'idle';
   const isCompleted = snapshot.status === 'completed';
-  const phase = bundle.resolved.phases[snapshot.phase.phaseIndex];
+  const phase = runBundle.resolved.phases[snapshot.phase.phaseIndex];
   const phaseDurationMs = (phase?.durationSeconds ?? 1) * 1_000;
-  const durationMinutes = bundle.resolved.plannedDurationSeconds / 60;
+  const durationMinutes = runBundle.resolved.plannedDurationSeconds / 60;
   const SoundIcon = audio.enabled
     ? referenceSoundIcons.on
     : referenceSoundIcons.off;
@@ -210,7 +231,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
       testID="focus-screen"
     >
       <View
-        accessibilityLabel={bundle.resolved.title}
+        accessibilityLabel={runBundle.resolved.title}
         style={styles.session}
         testID="focus-session"
       >
@@ -243,7 +264,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
             {isReady ? '准备' : isCompleted ? '完成' : snapshot.phase.label}
           </AppText>
           {isReady ? (
-            <AppText style={styles.rhythmLabel}>{bundle.rhythmLabel}</AppText>
+            <AppText style={styles.rhythmLabel}>{runBundle.rhythmLabel}</AppText>
           ) : isCompleted ? null : (
             <AppText systemFont style={styles.phaseCount}>
               {snapshot.phase.remainingInPhase}
@@ -257,7 +278,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
             phaseIndex={snapshot.phase.phaseIndex}
             phaseKind={snapshot.phase.kind}
             phaseProgress={snapshot.phase.phaseProgress}
-            phases={bundle.resolved.phases}
+            phases={runBundle.resolved.phases}
             reducedMotion={reducedMotion}
             status={snapshot.status}
           />
@@ -272,7 +293,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
                 : secondsToTimerLabel(snapshot.remainingSeconds)}
           </AppText>
           <AppText numberOfLines={1} style={styles.timerTitle} tone="muted">
-            {bundle.resolved.title}
+            {runBundle.resolved.title}
           </AppText>
         </View>
 
