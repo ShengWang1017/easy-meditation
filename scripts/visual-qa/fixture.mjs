@@ -14,10 +14,67 @@ import {
 import { VISUAL_QA_STATES } from './states.mjs';
 
 const FIXTURE_NOW = '2026-07-10T12:00:00+08:00';
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SESSION_DURATION_SECONDS = 300;
 const BUILT_IN_METHOD_IDS = ['box', 'four-seven-eight', 'coherent'];
 const CUSTOM_DURATION_MINUTES = [2, 3, 5, 10];
 const breathingMethodsSchema = breathingMethodSchema.array();
 const practiceSessionsSchema = practiceSessionSchema.array();
+const SESSION_STATE_SEMANTICS = {
+  'session-ready': {
+    status: 'idle',
+    phaseKind: 'inhale',
+    phaseProgress: 0,
+    elapsedSeconds: 0,
+    remainingSeconds: 300
+  },
+  'session-inhale': {
+    status: 'running',
+    phaseKind: 'inhale',
+    phaseProgress: 0.5,
+    elapsedSeconds: 2,
+    remainingSeconds: 298
+  },
+  'session-hold': {
+    status: 'running',
+    phaseKind: 'hold',
+    phaseProgress: 0.5,
+    elapsedSeconds: 6,
+    remainingSeconds: 294
+  },
+  'session-exhale': {
+    status: 'running',
+    phaseKind: 'exhale',
+    phaseProgress: 0.5,
+    elapsedSeconds: 10,
+    remainingSeconds: 290
+  },
+  'session-paused': {
+    status: 'paused',
+    phaseKind: 'exhale',
+    phaseProgress: 0.25,
+    elapsedSeconds: 9,
+    remainingSeconds: 291
+  },
+  'session-completed': {
+    status: 'completed',
+    phaseKind: 'complete',
+    phaseProgress: 1,
+    elapsedSeconds: 300,
+    remainingSeconds: 0
+  }
+};
+
+function fixtureUtcOffsetMs(timestamp) {
+  const match = /([+-])(\d{2}):(\d{2})$/.exec(timestamp);
+  if (!match) {
+    throw new Error('Fixture now must include an explicit UTC offset');
+  }
+  const direction = match[1] === '+' ? 1 : -1;
+  return direction * (Number(match[2]) * 60 + Number(match[3])) * 60_000;
+}
+
+const FIXTURE_UTC_OFFSET_MS = fixtureUtcOffsetMs(FIXTURE_NOW);
 
 function assertObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -239,27 +296,46 @@ function validateApiConsistency(api) {
 
   const stats = api.stats.populated;
   const sessions = api.sessions.populated;
-  const sessionsByIdentity = new Map(
-    sessions.map((session) => [
-      `${session.id}:${session.clientSessionId}`,
-      session
-    ])
+  const expectedRecentSessions = sessions
+    .slice()
+    .sort((left, right) => {
+      const endedAtDifference =
+        Date.parse(right.endedAt) - Date.parse(left.endedAt);
+      return endedAtDifference || left.id.localeCompare(right.id);
+    })
+    .slice(0, 10);
+  if (!isDeepStrictEqual(stats.recentSessions, expectedRecentSessions)) {
+    throw new Error(
+      'Fixture populated stats recentSessions must equal the newest 10 populated sessions'
+    );
+  }
+
+  const now = new Date(FIXTURE_NOW).getTime();
+  const fixtureLocalDay = (timestamp) =>
+    Math.floor((timestamp + FIXTURE_UTC_OFFSET_MS) / DAY_MS);
+  const practicedDays = new Set(
+    sessions
+      .map((session) => Date.parse(session.endedAt))
+      .filter((endedAt) => endedAt <= now)
+      .map(fixtureLocalDay)
   );
-  for (const recentSession of stats.recentSessions) {
-    const key = `${recentSession.id}:${recentSession.clientSessionId}`;
-    if (!isDeepStrictEqual(sessionsByIdentity.get(key), recentSession)) {
-      throw new Error(
-        'Fixture populated recentSessions must reference populated sessions'
-      );
-    }
+  let streakDay = fixtureLocalDay(now);
+  let currentStreak = 0;
+  while (practicedDays.has(streakDay)) {
+    currentStreak += 1;
+    streakDay -= 1;
+  }
+  if (stats.currentStreak !== currentStreak) {
+    throw new Error(
+      'Fixture populated stats currentStreak must match fixture-local session days'
+    );
   }
 
   const totalPracticeSeconds = sessions.reduce(
     (total, session) => total + session.actualDurationSeconds,
     0
   );
-  const now = new Date(FIXTURE_NOW).getTime();
-  const weeklyStart = now - 6 * 24 * 60 * 60 * 1000;
+  const weeklyStart = now - 6 * DAY_MS;
   const weeklyPracticeSeconds = sessions
     .filter((session) => {
       const endedAt = new Date(session.endedAt).getTime();
@@ -279,12 +355,6 @@ function validateApiConsistency(api) {
 
 function validateSessionState(id, session) {
   assertObject(session, `${id}.session`);
-  if (!['idle', 'running', 'paused', 'completed'].includes(session.status)) {
-    throw new Error(`${id}.session.status is unsupported`);
-  }
-  if (!['inhale', 'hold', 'exhale', 'complete'].includes(session.phaseKind)) {
-    throw new Error(`${id}.session.phaseKind is unsupported`);
-  }
   if (
     !Number.isFinite(session.phaseProgress) ||
     session.phaseProgress < 0 ||
@@ -295,9 +365,71 @@ function validateSessionState(id, session) {
     );
   }
   for (const key of ['elapsedSeconds', 'remainingSeconds']) {
-    if (!Number.isFinite(session[key]) || session[key] < 0) {
-      throw new Error(`${id}.session.${key} must be non-negative`);
+    if (
+      !Number.isInteger(session[key]) ||
+      session[key] < 0 ||
+      session[key] > SESSION_DURATION_SECONDS
+    ) {
+      throw new Error(
+        `${id}.session.${key} must be an integer between 0 and ${SESSION_DURATION_SECONDS}`
+      );
     }
+  }
+  if (
+    session.elapsedSeconds + session.remainingSeconds !==
+    SESSION_DURATION_SECONDS
+  ) {
+    throw new Error(
+      `${id}.session elapsedSeconds and remainingSeconds must sum to ${SESSION_DURATION_SECONDS}`
+    );
+  }
+
+  const expected = SESSION_STATE_SEMANTICS[id];
+  if (!expected) {
+    throw new Error(`${id}.session has no declared semantics`);
+  }
+  if (session.status !== expected.status) {
+    throw new Error(`${id}.session.status must be ${expected.status}`);
+  }
+  if (session.phaseKind !== expected.phaseKind) {
+    throw new Error(`${id}.session.phaseKind must be ${expected.phaseKind}`);
+  }
+
+  if (id === 'session-ready') {
+    if (
+      session.phaseProgress !== expected.phaseProgress ||
+      session.elapsedSeconds !== expected.elapsedSeconds
+    ) {
+      throw new Error(`${id}.session must start at progress 0 and elapsed 0`);
+    }
+    return;
+  }
+  if (id === 'session-completed') {
+    if (
+      session.phaseProgress !== expected.phaseProgress ||
+      session.elapsedSeconds !== expected.elapsedSeconds ||
+      session.remainingSeconds !== expected.remainingSeconds
+    ) {
+      throw new Error(
+        `${id}.session must finish at progress 1, elapsed ${SESSION_DURATION_SECONDS}, and remaining 0`
+      );
+    }
+    return;
+  }
+  if (session.phaseProgress <= 0 || session.phaseProgress >= 1) {
+    throw new Error(
+      `${id}.session.phaseProgress must be greater than 0 and less than 1`
+    );
+  }
+  if (session.elapsedSeconds === 0 || session.remainingSeconds === 0) {
+    throw new Error(`${id}.session must be inside the planned duration`);
+  }
+  if (
+    session.phaseProgress !== expected.phaseProgress ||
+    session.elapsedSeconds !== expected.elapsedSeconds ||
+    session.remainingSeconds !== expected.remainingSeconds
+  ) {
+    throw new Error(`${id}.session must exactly match its visual snapshot`);
   }
 }
 

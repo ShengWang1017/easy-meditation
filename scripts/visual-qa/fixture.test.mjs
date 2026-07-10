@@ -19,6 +19,41 @@ const fixturePath = path.join(
   'qa/fixtures/mobile-prototype.json'
 );
 
+function configurePopulatedApi(
+  fixture,
+  sessions,
+  { currentStreak, recentSessions }
+) {
+  fixture.api.sessions.populated = sessions;
+  fixture.api.stats.populated = {
+    totalSessions: sessions.length,
+    totalPracticeSeconds: sessions.reduce(
+      (total, session) => total + session.actualDurationSeconds,
+      0
+    ),
+    weeklyPracticeSeconds: sessions.reduce(
+      (total, session) => total + session.actualDurationSeconds,
+      0
+    ),
+    currentStreak,
+    recentSessions
+  };
+}
+
+function syntheticSession(base, index, endedAt) {
+  const suffix = String(index + 1).padStart(12, '0');
+  const endedAtMs = Date.parse(endedAt);
+  return {
+    ...structuredClone(base),
+    id: `22222222-2222-4222-8222-${suffix}`,
+    clientSessionId: `33333333-3333-4333-8333-${suffix}`,
+    actualDurationSeconds: 60,
+    startedAt: new Date(endedAtMs - 60_000).toISOString(),
+    endedAt: new Date(endedAtMs).toISOString(),
+    createdAt: new Date(endedAtMs).toISOString()
+  };
+}
+
 test('loads the shared deterministic fixture with all 13 explicit state scopes', async () => {
   const fixture = await loadVisualQaFixture(fixturePath);
   const stateIds = VISUAL_QA_STATES.map(({ id }) => id);
@@ -97,6 +132,89 @@ test('rejects invalid session progress and secret-like fixture keys', async () =
     () => validateVisualQaFixture(secretBearing),
     /Fixture contains forbidden secret-like key: api\.accessToken/
   );
+});
+
+test('binds each session fixture ID to its exact lifecycle semantics', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+
+  const completedAsInhale = structuredClone(fixture);
+  completedAsInhale.states['session-inhale'].session = structuredClone(
+    completedAsInhale.states['session-completed'].session
+  );
+  assert.throws(
+    () => validateVisualQaFixture(completedAsInhale),
+    /session-inhale\.session\.status must be running/
+  );
+
+  const advancedReady = structuredClone(fixture);
+  Object.assign(advancedReady.states['session-ready'].session, {
+    phaseProgress: 0.25,
+    elapsedSeconds: 1,
+    remainingSeconds: 299
+  });
+  assert.throws(
+    () => validateVisualQaFixture(advancedReady),
+    /session-ready\.session must start at progress 0 and elapsed 0/
+  );
+
+  const wrongPausedPhase = structuredClone(fixture);
+  wrongPausedPhase.states['session-paused'].session.phaseKind = 'hold';
+  assert.throws(
+    () => validateVisualQaFixture(wrongPausedPhase),
+    /session-paused\.session\.phaseKind must be exhale/
+  );
+
+  const invalidDuration = structuredClone(fixture);
+  invalidDuration.states['session-hold'].session.remainingSeconds = 293;
+  assert.throws(
+    () => validateVisualQaFixture(invalidDuration),
+    /session-hold\.session elapsedSeconds and remainingSeconds must sum to 300/
+  );
+
+  const incompleteCompletion = structuredClone(fixture);
+  Object.assign(incompleteCompletion.states['session-completed'].session, {
+    elapsedSeconds: 299,
+    remainingSeconds: 1
+  });
+  assert.throws(
+    () => validateVisualQaFixture(incompleteCompletion),
+    /session-completed\.session must finish at progress 1, elapsed 300, and remaining 0/
+  );
+});
+
+test('requires running and paused snapshots to remain inside an active phase', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+  const terminalRunningPhase = structuredClone(fixture);
+  terminalRunningPhase.states['session-exhale'].session.phaseProgress = 1;
+
+  assert.throws(
+    () => validateVisualQaFixture(terminalRunningPhase),
+    /session-exhale\.session\.phaseProgress must be greater than 0 and less than 1/
+  );
+});
+
+test('locks active session IDs to their exact visual snapshot values', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+  const mutations = [
+    ['session-inhale', 0.75, 3, 297],
+    ['session-hold', 0.75, 7, 293],
+    ['session-exhale', 0.75, 11, 289],
+    ['session-paused', 0.5, 10, 290]
+  ];
+
+  for (const [id, phaseProgress, elapsedSeconds, remainingSeconds] of mutations) {
+    const mutated = structuredClone(fixture);
+    Object.assign(mutated.states[id].session, {
+      phaseProgress,
+      elapsedSeconds,
+      remainingSeconds
+    });
+    assert.throws(
+      () => validateVisualQaFixture(mutated),
+      new RegExp(`${id}\\.session must exactly match its visual snapshot`),
+      id
+    );
+  }
 });
 
 test('validates API fixtures through the shared contract schemas', async () => {
@@ -213,7 +331,117 @@ test('requires empty and populated stats to agree with their session fixtures', 
     '55555555-5555-4555-8555-555555555555';
   assert.throws(
     () => validateVisualQaFixture(missingRecentSession),
-    /Fixture populated recentSessions must reference populated sessions/
+    /Fixture populated stats recentSessions must equal the newest 10 populated sessions/
+  );
+});
+
+test('derives currentStreak from fixture +08 local days independent of host TZ', async () => {
+  const originalTz = process.env.TZ;
+  process.env.TZ = 'UTC';
+  try {
+    const fixture = await loadVisualQaFixture(fixturePath);
+    assert.doesNotThrow(() => validateVisualQaFixture(fixture));
+
+    const impossibleStreak = structuredClone(fixture);
+    impossibleStreak.api.stats.populated.currentStreak = 999;
+    assert.throws(
+      () => validateVisualQaFixture(impossibleStreak),
+      /Fixture populated stats currentStreak must match fixture-local session days/
+    );
+
+    const twoLocalDays = structuredClone(fixture);
+    const today = structuredClone(twoLocalDays.api.sessions.populated[0]);
+    const previousLocalDay = {
+      ...structuredClone(today),
+      id: '66666666-6666-4666-8666-666666666666',
+      clientSessionId: '77777777-7777-4777-8777-777777777777',
+      startedAt: '2026-07-08T16:25:00.000Z',
+      endedAt: '2026-07-08T16:30:00.000Z',
+      createdAt: '2026-07-08T16:30:00.000Z'
+    };
+    configurePopulatedApi(twoLocalDays, [today, previousLocalDay], {
+      currentStreak: 2,
+      recentSessions: [today, previousLocalDay]
+    });
+    assert.doesNotThrow(() => validateVisualQaFixture(twoLocalDays));
+
+    const utcDayGapIsNotALocalGap = structuredClone(twoLocalDays);
+    utcDayGapIsNotALocalGap.api.stats.populated.currentStreak = 1;
+    assert.throws(
+      () => validateVisualQaFixture(utcDayGapIsNotALocalGap),
+      /Fixture populated stats currentStreak must match fixture-local session days/
+    );
+  } finally {
+    if (originalTz === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTz;
+    }
+  }
+});
+
+test('requires recentSessions to equal the id-tiebroken newest ten server sessions', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+  const base = fixture.api.sessions.populated[0];
+  const sourceIndexes = [1, 0, 4, 2, 3, 10, 5, 6, 7, 8, 9];
+  const sessions = sourceIndexes.map((index) => {
+    const minuteOffset = Math.floor(index / 2);
+    const endedAt = new Date(
+      Date.parse('2026-07-10T03:59:00.000Z') - minuteOffset * 60_000
+    ).toISOString();
+    return syntheticSession(base, index, endedAt);
+  });
+  const expectedRecent = sessions
+    .slice()
+    .sort((left, right) => {
+      const endedAtDifference =
+        Date.parse(right.endedAt) - Date.parse(left.endedAt);
+      return endedAtDifference || left.id.localeCompare(right.id);
+    })
+    .slice(0, 10);
+  configurePopulatedApi(fixture, sessions, {
+    currentStreak: 1,
+    recentSessions: expectedRecent
+  });
+  assert.doesNotThrow(() => validateVisualQaFixture(fixture));
+
+  const emptyRecent = structuredClone(fixture);
+  emptyRecent.api.stats.populated.recentSessions = [];
+  assert.throws(
+    () => validateVisualQaFixture(emptyRecent),
+    /Fixture populated stats recentSessions must equal the newest 10 populated sessions/
+  );
+
+  const reorderedRecent = structuredClone(fixture);
+  [
+    reorderedRecent.api.stats.populated.recentSessions[0],
+    reorderedRecent.api.stats.populated.recentSessions[1]
+  ] = [
+    reorderedRecent.api.stats.populated.recentSessions[1],
+    reorderedRecent.api.stats.populated.recentSessions[0]
+  ];
+  assert.throws(
+    () => validateVisualQaFixture(reorderedRecent),
+    /Fixture populated stats recentSessions must equal the newest 10 populated sessions/
+  );
+
+  const omittedRecent = structuredClone(fixture);
+  omittedRecent.api.stats.populated.recentSessions.pop();
+  assert.throws(
+    () => validateVisualQaFixture(omittedRecent),
+    /Fixture populated stats recentSessions must equal the newest 10 populated sessions/
+  );
+
+  const includedEleventh = structuredClone(fixture);
+  includedEleventh.api.stats.populated.recentSessions[9] = sessions.find(
+    (session) =>
+      !expectedRecent.some(
+        (recent) => recent.clientSessionId === session.clientSessionId
+      )
+  );
+  assert.throws(
+    () => validateVisualQaFixture(includedEleventh),
+    /Fixture populated stats recentSessions must equal the newest 10 populated sessions/
   );
 });
 
