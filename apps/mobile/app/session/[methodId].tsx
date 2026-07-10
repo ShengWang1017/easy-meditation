@@ -126,8 +126,20 @@ export default function SessionScreen() {
     isCustomMethod,
     methodsQuery.data
   ]);
+  const retainedBundleRef = useRef<{
+    routeMethodId: string | undefined;
+    bundle: SessionMethodBundle | null;
+  }>({ routeMethodId, bundle: null });
+  if (retainedBundleRef.current.routeMethodId !== routeMethodId) {
+    retainedBundleRef.current = { routeMethodId, bundle: null };
+  }
+  if (retainedBundleRef.current.bundle === null && bundle !== null) {
+    retainedBundleRef.current = { routeMethodId, bundle };
+  }
+  const retainedBundle = retainedBundleRef.current.bundle;
 
   if (
+    retainedBundle === null &&
     builtInMethodId !== null &&
     methodsQuery.isPending &&
     !methodsQuery.data
@@ -139,7 +151,7 @@ export default function SessionScreen() {
     );
   }
 
-  if (!bundle) {
+  if (!retainedBundle) {
     const loadFailure = builtInMethodId !== null && methodsQuery.isError;
     return (
       <FocusState>
@@ -160,7 +172,7 @@ export default function SessionScreen() {
 
   return (
     <FocusSessionView
-      bundle={bundle}
+      bundle={retainedBundle}
       key={routeMethodId}
     />
   );

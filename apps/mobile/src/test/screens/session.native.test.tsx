@@ -382,6 +382,38 @@ describe('SessionScreen', () => {
     });
   });
 
+  it('retains the first valid bundle when a same-route refetch removes the method', async () => {
+    mockController.snapshot = sessionSnapshot('running');
+    const view = await renderSession({
+      cachedMethods: [boxMethod],
+      methods: [boxMethod]
+    });
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+    const initialFocusOptions = mockFocusOptions;
+    const initialRenderCount = mockFocusOptionsHistory.length;
+
+    act(() => {
+      view.queryClient.setQueryData(publicQueryKeys.methods, []);
+    });
+
+    await waitFor(() =>
+      expect(mockFocusOptionsHistory.length).toBeGreaterThan(initialRenderCount)
+    );
+    expect(view.queryByText('没有找到这项练习')).toBeNull();
+    expect(view.getByText('00:58')).toBeTruthy();
+    expect(view.getByText('盒式呼吸法')).toBeTruthy();
+    expect(view.getByRole('button', { name: '暂停' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '结束训练' })).toBeTruthy();
+    expect(view.getByTestId('breathing-canvas').props).toMatchObject({
+      phaseDurationMs: 4_000,
+      phases: boxMethod.phases
+    });
+    expect(mockFocusOptions).toMatchObject({
+      method: initialFocusOptions?.method,
+      clockMethod: initialFocusOptions?.clockMethod
+    });
+  });
+
   it('matches focus action typography while retaining minimum touch targets', async () => {
     const ready = await renderSession();
     await waitFor(() => expect(ready.getByText('开始')).toBeTruthy());
