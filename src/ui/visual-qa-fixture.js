@@ -195,6 +195,7 @@ function createReferenceAppOptions(stateId) {
           )
         ]
       : [];
+  const visualTimeMs = sessionVisualTimeMs(stateId, session);
   storage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(records));
 
   return {
@@ -202,6 +203,7 @@ function createReferenceAppOptions(stateId) {
     storage,
     dateAdapter: FIXTURE_DATE_ADAPTER,
     cuePlayer: createSilentCuePort(),
+    runtime: createStaticRenderingRuntime(visualTimeMs),
     audioEnabled: VISUAL_QA_FIXTURE.preferences.soundEnabled,
     methods: createFixtureMethods(),
     initialization: {
@@ -226,7 +228,7 @@ function createReferenceAppOptions(stateId) {
       elapsedSeconds: session?.elapsedSeconds ?? 0
     },
     staticRendering: true,
-    visualTimeMs: sessionVisualTimeMs(stateId, session)
+    visualTimeMs
   };
 }
 
@@ -409,6 +411,22 @@ function createSilentCuePort() {
     stopBackground() {},
     play() {}
   };
+}
+
+function createStaticRenderingRuntime(visualTimeMs) {
+  return Object.freeze({
+    now: () => visualTimeMs,
+    setTimeout() {
+      throw new Error('Static visual QA fixtures cannot schedule timers.');
+    },
+    clearTimeout() {},
+    requestAnimationFrame() {
+      throw new Error(
+        'Static visual QA fixtures cannot schedule animation frames.'
+      );
+    },
+    cancelAnimationFrame() {}
+  });
 }
 
 function cloneManifest(manifest) {

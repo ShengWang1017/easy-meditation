@@ -23,17 +23,13 @@ afterEach(() => {
 });
 
 describe('meditation app initialization', () => {
-  test('renders every supported fixture manifest from its deterministic snapshot', () => {
+  test('renders every supported fixture without touching global schedulers', () => {
     for (const stateId of WEB_REFERENCE_STATE_IDS) {
       const { window, root } = createDom();
       installThrowingGlobalSchedulers(window);
       globalThis.window = window;
       const request = resolveVisualQaRequest(`${LOOPBACK_ROOT}${stateId}`);
-      const runtime = createStaticRuntime();
-      const app = createMeditationApp(root, {
-        ...request.appOptions,
-        runtime
-      });
+      const app = createMeditationApp(root, request.appOptions);
       openApps.push(app);
 
       assert.equal(app.getSnapshot().view, request.appOptions.initialization.view);
@@ -47,7 +43,6 @@ describe('meditation app initialization', () => {
           `${stateId} must render ${id} exactly once`
         );
       }
-      assert.deepEqual(runtime.calls, []);
       if (stateId === 'custom') {
         const customStart = root.querySelector('[data-od-id="custom-start"]');
         assert.equal(customStart.tagName, 'BUTTON');
@@ -57,7 +52,6 @@ describe('meditation app initialization', () => {
         assert.equal(app.getSnapshot().view, 'focus');
         assert.equal(app.getSnapshot().status, 'running');
         assert.equal(app.getSnapshot().method.id, 'custom');
-        assert.deepEqual(runtime.calls, []);
       }
       if (stateId === 'session-ready') {
         assert.equal(
@@ -163,23 +157,6 @@ function createRuntime() {
       return nextId++;
     },
     cancelAnimationFrame: () => {}
-  };
-}
-
-function createStaticRuntime() {
-  return {
-    calls: [],
-    now() {
-      throw new Error('static fixture read the live runtime clock');
-    },
-    setTimeout() {
-      throw new Error('static fixture scheduled a timer');
-    },
-    clearTimeout() {},
-    requestAnimationFrame() {
-      throw new Error('static fixture scheduled an animation frame');
-    },
-    cancelAnimationFrame() {}
   };
 }
 

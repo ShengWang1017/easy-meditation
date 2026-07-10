@@ -166,12 +166,28 @@ describe('Web visual QA fixture request', () => {
       kind: 'normal'
     });
     assert.deepEqual(
-      resolveVisualQaRequest('https://example.com/?visualQaState=practice'),
+      resolveVisualQaRequest('https://127.0.0.1/?visualQaState=practice'),
+      { kind: 'normal' }
+    );
+    assert.deepEqual(
+      resolveVisualQaRequest('http://example.com/?visualQaState=practice'),
       { kind: 'normal' }
     );
     assert.deepEqual(
       resolveVisualQaRequest('http://127.0.0.1:60323/#visualQaState=practice'),
       { kind: 'normal' }
+    );
+
+    assert.deepEqual(
+      resolveVisualQaRequest(
+        'http://127.0.0.1:60323/?visualQaState='
+      ),
+      {
+        kind: 'invalid',
+        stateId: '',
+        reason:
+          'Visual QA fixture URLs require exactly one visualQaState value.'
+      }
     );
 
     const unknown = resolveVisualQaRequest(

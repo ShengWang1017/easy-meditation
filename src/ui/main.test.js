@@ -78,6 +78,27 @@ describe('Web visual QA bootstrap', () => {
     assert.match(logs[0], /"marker":"VISUAL_QA_READY"/);
   });
 
+  test('real fixture bootstrap reserves its injected RAF only for READY', () => {
+    const { window, document } = createDom(
+      `${LOOPBACK_ROOT}?visualQaState=session-inhale`
+    );
+    installThrowingGlobalSchedulers(window);
+    window.HTMLCanvasElement.prototype.getContext = () => null;
+    const frames = [];
+
+    const result = bootstrapMeditationApp({
+      document,
+      url: window.location.href,
+      requestAnimationFrame: (callback) => frames.push(callback),
+      consoleTarget: { info() {}, error() {} }
+    });
+
+    assert.equal(result.request.kind, 'reference');
+    assert.equal(result.app.getSnapshot().status, 'running');
+    assert.equal(frames.length, 1);
+    result.app.destroy();
+  });
+
   test('renders and emits explicit errors for invalid and native-only requests without READY', () => {
     for (const [query, expectedKind] of [
       ['future-state', 'invalid'],
@@ -164,4 +185,19 @@ function installManifestElements(root, manifest) {
     });
     root.append(element);
   }
+}
+
+function installThrowingGlobalSchedulers(window) {
+  window.setTimeout = () => {
+    throw new Error('fixture app touched global setTimeout');
+  };
+  window.clearTimeout = () => {
+    throw new Error('fixture app touched global clearTimeout');
+  };
+  window.requestAnimationFrame = () => {
+    throw new Error('fixture app touched global requestAnimationFrame');
+  };
+  window.cancelAnimationFrame = () => {
+    throw new Error('fixture app touched global cancelAnimationFrame');
+  };
 }
