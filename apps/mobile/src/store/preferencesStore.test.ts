@@ -2,8 +2,33 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BreathingPhase } from '@easy-meditation/shared';
 import type { StateStorage } from 'zustand/middleware';
 
+vi.mock('../api/client', () => ({
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number;
+    code: string;
+    retryAfterMs?: number;
+
+    constructor(options: {
+      status: number;
+      code: string;
+      message: string;
+      retryAfterMs?: number;
+    }) {
+      super(options.message);
+      this.name = 'ApiRequestError';
+      this.status = options.status;
+      this.code = options.code;
+      this.retryAfterMs = options.retryAfterMs;
+    }
+  }
+}));
+
 import { redistributeCycleSeconds } from '../domain/customRhythm';
-import type { LocalSessionLedgerEntry } from '../domain/sessionLedger';
+import {
+  transitionAfterFailure,
+  type LocalSessionLedgerEntry
+} from '../domain/sessionLedger';
+import { ApiRequestError } from '../api/client';
 import {
   DEFAULT_PREFERENCES,
   createUserPreferencesStore,
@@ -366,6 +391,36 @@ describe('user preferences persistence', () => {
     expect(store.getState().localSessionLedger).toHaveLength(1);
     expect(readPersisted(memory, 'ledger-crud').state.localSessionLedger).toHaveLength(1);
     expect(memory.writes).toHaveLength(4);
+  });
+
+  it('persists retry-state transitions produced by the ledger state machine', async () => {
+    const memory = createMemoryStorage();
+    const store = createUserPreferencesStore('ledger-retry-state', memory.storage);
+    const pending = pendingLedgerEntry();
+    const nowMs = Date.parse('2026-07-10T12:00:00.000Z');
+    await store.getState().putLedgerEntry(pending);
+
+    await store.getState().updateLedgerEntry(pending.clientSessionId, (current) => {
+      if (!('attemptCount' in current)) throw new Error('Expected retryable row.');
+      return transitionAfterFailure(
+        current,
+        new ApiRequestError({
+          status: 503,
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Service unavailable.'
+        }),
+        nowMs
+      );
+    });
+
+    expect(readPersisted(memory, 'ledger-retry-state').state.localSessionLedger).toEqual([
+      expect.objectContaining({
+        state: 'pending',
+        attemptCount: 1,
+        nextAttemptAt: new Date(nowMs + 5_000).toISOString(),
+        lastErrorCode: 'SERVICE_UNAVAILABLE'
+      })
+    ]);
   });
 
   it('recovers only an invalid custom rhythm slice during hydration', async () => {

@@ -14,7 +14,11 @@ vi.mock('./client', () => ({
   apiRequest: apiRequestMock
 }));
 
-import { buildCompletedPracticeSessionInput, createPracticeSession } from './sessions';
+import {
+  buildCompletedPracticeSessionInput,
+  createPracticeSession,
+  fetchPracticeSessions
+} from './sessions';
 
 const rhythmSnapshot: BreathingPhase[] = [
   { kind: 'inhale', label: '吸气', durationSeconds: 4 },
@@ -111,5 +115,27 @@ describe('createPracticeSession', () => {
         actualDurationSeconds: 298
       }).methodTitleSnapshot
     ).toBe(unknownMethod.title);
+  });
+});
+
+describe('fetchPracticeSessions', () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it('loads and validates the existing GET practice sessions endpoint', async () => {
+    apiRequestMock.mockResolvedValue([session]);
+
+    await expect(fetchPracticeSessions()).resolves.toEqual([session]);
+
+    expect(apiRequestMock).toHaveBeenCalledWith('/practice-sessions');
+  });
+
+  it('rejects a malformed practice sessions response', async () => {
+    apiRequestMock.mockResolvedValue([{ ...session, id: 'not-a-uuid' }]);
+
+    await expect(fetchPracticeSessions()).rejects.toMatchObject({
+      name: 'ZodError'
+    });
   });
 });

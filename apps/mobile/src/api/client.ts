@@ -26,6 +26,7 @@ type ApiRequestErrorOptions = {
   code: string;
   message: string;
   fields?: Record<string, string>;
+  retryAfterMs?: number;
 };
 
 type AuthSessionSnapshot = {
@@ -42,13 +43,21 @@ export class ApiRequestError extends Error {
   status: number;
   code: string;
   fields?: Record<string, string>;
+  retryAfterMs?: number;
 
-  constructor({ status, code, message, fields }: ApiRequestErrorOptions) {
+  constructor({
+    status,
+    code,
+    message,
+    fields,
+    retryAfterMs
+  }: ApiRequestErrorOptions) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -119,8 +128,26 @@ function toApiRequestError<T>(response: Response, body: ApiEnvelope<T>): ApiRequ
     status: response.status,
     code: body.error.code,
     message: body.error.message,
-    fields: body.error.fields
+    fields: body.error.fields,
+    retryAfterMs: parseRetryAfterMs(response)
   });
+}
+
+function parseRetryAfterMs(response: Response): number | undefined {
+  const retryAfter = response.headers?.get?.('retry-after')?.trim();
+  if (!retryAfter) {
+    return undefined;
+  }
+
+  if (/^\d+$/.test(retryAfter)) {
+    const seconds = Number(retryAfter);
+    return Number.isSafeInteger(seconds) ? seconds * 1_000 : undefined;
+  }
+
+  const retryAtMs = Date.parse(retryAfter);
+  return Number.isFinite(retryAtMs)
+    ? Math.max(0, retryAtMs - Date.now())
+    : undefined;
 }
 
 function getCurrentTokenPair(): TokenPair | null {

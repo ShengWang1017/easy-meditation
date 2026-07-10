@@ -9,12 +9,13 @@ import {
 } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { meSchema } from '@easy-meditation/shared';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { getMe } from '../api/auth';
 import { InlineState } from '../components/InlineState';
 import { activeUserScopeCoordinator } from '../query/client';
 import { authQueryKeys } from '../query/keys';
+import { createAuthenticatedSessionOutbox } from '../services/sessionOutbox';
 import { PreferencesStoreProvider } from '../store/PreferencesStoreProvider';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -34,6 +35,7 @@ type PreparedSession = AuthSessionContextValue & {
 };
 
 export function AuthSessionBoundary({ children }: AuthSessionBoundaryProps) {
+  const queryClient = useQueryClient();
   const accessToken = useAuthStore((state) => state.accessToken);
   const isTerminating = useAuthStore((state) => state.isTerminating);
   const sessionRevision = useAuthStore((state) => state.sessionRevision);
@@ -72,11 +74,28 @@ export function AuthSessionBoundary({ children }: AuthSessionBoundaryProps) {
           return;
         }
 
+        const sessionOutbox = createAuthenticatedSessionOutbox({
+          userId: user.id,
+          preferencesStore,
+          queryClient,
+          onTerminalUnauthorized: async () => {
+            const auth = useAuthStore.getState();
+            if (auth.sessionRevision === sessionRevision) {
+              auth.requestTerminalSessionClear();
+            }
+          }
+        });
+        await sessionOutbox.drainDue({ resumeAuthBlocked: true });
+        if (superseded || generationRef.current !== generation) {
+          return;
+        }
+
         setPrepared({
           revision: sessionRevision,
           user,
           userId: user.id,
-          preferencesStore
+          preferencesStore,
+          sessionOutbox
         });
       } catch (error) {
         if (!superseded && generationRef.current === generation) {
@@ -92,6 +111,7 @@ export function AuthSessionBoundary({ children }: AuthSessionBoundaryProps) {
     hasAccessToken,
     isTerminating,
     preparationAttempt,
+    queryClient,
     sessionRevision,
     user
   ]);

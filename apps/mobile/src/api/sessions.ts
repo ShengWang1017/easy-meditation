@@ -1,7 +1,8 @@
-import type {
-  BreathingMethod,
-  PracticeSession,
-  PracticeSessionCreateInput
+import {
+  practiceSessionSchema,
+  type BreathingMethod,
+  type PracticeSession,
+  type PracticeSessionCreateInput
 } from '@easy-meditation/shared';
 import { getMethodDisplayTitle } from '../domain/methodPresentation';
 import { apiRequest } from './client';
@@ -43,4 +44,9 @@ export async function createPracticeSession(
     method: 'POST',
     body: JSON.stringify(input)
   });
+}
+
+export async function fetchPracticeSessions(): Promise<PracticeSession[]> {
+  const sessions = await apiRequest<unknown>('/practice-sessions');
+  return practiceSessionSchema.array().parse(sessions);
 }

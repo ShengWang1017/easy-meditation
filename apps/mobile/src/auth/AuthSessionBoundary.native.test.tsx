@@ -15,6 +15,11 @@ const mockNativeSecureStore = {
   getItemAsync: jest.fn(async () => null),
   deleteItemAsync: jest.fn(async () => undefined)
 };
+const mockSessionOutbox = {
+  submit: jest.fn(async (): Promise<void> => undefined),
+  drainDue: jest.fn(async (): Promise<void> => undefined),
+  retryNow: jest.fn(async (): Promise<void> => undefined)
+};
 
 jest.mock(
   '@easy-meditation/shared',
@@ -88,6 +93,9 @@ jest.mock('../store/preferencesStore', () => ({
   createUserPreferencesStore: jest.fn(),
   hydrateUserPreferencesStore: jest.fn()
 }));
+jest.mock('../services/sessionOutbox', () => ({
+  createAuthenticatedSessionOutbox: jest.fn()
+}));
 
 import type { Me } from '@easy-meditation/shared';
 import { getMe, login, logout } from '../api/auth';
@@ -97,6 +105,10 @@ import {
   hydrateUserPreferencesStore,
   type UserPreferencesStore
 } from '../store/preferencesStore';
+import {
+  createAuthenticatedSessionOutbox,
+  type SessionOutbox
+} from '../services/sessionOutbox';
 import { useAuthStore } from '../store/authStore';
 import { createTestQueryClient, renderWithProviders } from '../test/renderWithProviders';
 import { AuthSessionBoundary, useAuthSession } from './AuthSessionBoundary';
@@ -141,6 +153,14 @@ function SessionProbe() {
   return <Text testID="session-user">{session.userId}</Text>;
 }
 
+function OutboxProbe({ onOutbox }: { onOutbox(outbox: SessionOutbox): void }) {
+  const session = useAuthSession();
+  React.useEffect(() => {
+    onOutbox(session.sessionOutbox);
+  }, [onOutbox, session.sessionOutbox]);
+  return <Text testID="session-outbox">ready</Text>;
+}
+
 function ProtectedScopeMount({
   coordinator
 }: {
@@ -167,6 +187,9 @@ const createStoreMock = createUserPreferencesStore as jest.MockedFunction<
 const hydrateMock = hydrateUserPreferencesStore as jest.MockedFunction<
   typeof hydrateUserPreferencesStore
 >;
+const createOutboxMock = createAuthenticatedSessionOutbox as jest.MockedFunction<
+  typeof createAuthenticatedSessionOutbox
+>;
 
 describe('AuthSessionBoundary', () => {
   beforeEach(() => {
@@ -188,6 +211,13 @@ describe('AuthSessionBoundary', () => {
     retireMock.mockReset();
     createStoreMock.mockReset();
     hydrateMock.mockReset();
+    createOutboxMock.mockReset();
+    mockSessionOutbox.submit.mockReset();
+    mockSessionOutbox.submit.mockResolvedValue(undefined);
+    mockSessionOutbox.drainDue.mockReset();
+    mockSessionOutbox.drainDue.mockResolvedValue(undefined);
+    mockSessionOutbox.retryNow.mockReset();
+    mockSessionOutbox.retryNow.mockResolvedValue(undefined);
     useAuthStore.setState({
       accessToken: 'access-a',
       refreshToken: 'refresh-a',
@@ -201,6 +231,7 @@ describe('AuthSessionBoundary', () => {
     retireMock.mockResolvedValue(undefined);
     createStoreMock.mockImplementation(() => fakeStore());
     hydrateMock.mockResolvedValue(undefined);
+    createOutboxMock.mockReturnValue(mockSessionOutbox);
   });
 
   it('keeps children closed until me, scope activation, and preference hydration resolve', async () => {
@@ -232,6 +263,99 @@ describe('AuthSessionBoundary', () => {
     await waitFor(() => {
       expect(view.getByTestId('session-user').props.children).toBe(USER_A.id);
     });
+  });
+
+  it('drains auth-blocked and due ledger rows after hydration before exposing children', async () => {
+    getMeMock.mockResolvedValue(USER_A);
+    const drain = deferred<void>();
+    mockSessionOutbox.drainDue.mockReturnValue(drain.promise);
+    const queryClient = createTestQueryClient();
+    const view = renderWithProviders(
+      <AuthSessionBoundary>
+        <SessionProbe />
+      </AuthSessionBoundary>,
+      { queryClient }
+    );
+
+    await waitFor(() => {
+      expect(createOutboxMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: USER_A.id,
+          preferencesStore: expect.anything(),
+          queryClient,
+          onTerminalUnauthorized: expect.any(Function)
+        })
+      );
+      expect(mockSessionOutbox.drainDue).toHaveBeenCalledWith({
+        resumeAuthBlocked: true
+      });
+    });
+    expect(view.queryByTestId('session-user')).toBeNull();
+
+    await act(async () => drain.resolve());
+    await waitFor(() => expect(view.getByTestId('session-user')).toBeTruthy());
+  });
+
+  it('keeps one session-scoped outbox instance across access-token rotation', async () => {
+    getMeMock.mockResolvedValue(USER_A);
+    const onOutbox = jest.fn();
+    const view = renderWithProviders(
+      <AuthSessionBoundary>
+        <OutboxProbe onOutbox={onOutbox} />
+      </AuthSessionBoundary>,
+      { queryClient: createTestQueryClient() }
+    );
+
+    await waitFor(() => expect(view.getByTestId('session-outbox')).toBeTruthy());
+    expect(onOutbox).toHaveBeenCalledWith(mockSessionOutbox);
+    expect(createOutboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => useAuthStore.setState({ accessToken: 'rotated-access-a' }));
+
+    expect(view.getByTestId('session-outbox')).toBeTruthy();
+    expect(createOutboxMock).toHaveBeenCalledTimes(1);
+    expect(new Set(onOutbox.mock.calls.map(([outbox]) => outbox))).toEqual(
+      new Set([mockSessionOutbox])
+    );
+  });
+
+  it('does not let a superseded account outbox terminate the next authenticated session', async () => {
+    jest.useFakeTimers();
+    try {
+      getMeMock.mockResolvedValue(USER_A);
+      const view = renderWithProviders(
+        <AuthSessionBoundary>
+          <SessionProbe />
+        </AuthSessionBoundary>,
+        { queryClient: createTestQueryClient() }
+      );
+      await waitFor(() => expect(view.getByTestId('session-user')).toBeTruthy());
+      const outboxOptions = createOutboxMock.mock.calls[0]?.[0];
+      expect(outboxOptions).toBeDefined();
+      if (!outboxOptions) throw new Error('Expected outbox options.');
+
+      getMeMock.mockReturnValueOnce(new Promise<Me>(() => undefined));
+      act(() => {
+        useAuthStore.setState({
+          accessToken: 'access-b',
+          refreshToken: 'refresh-b',
+          sessionRevision: 2,
+          isTerminating: false
+        });
+      });
+
+      await act(async () => outboxOptions.onTerminalUnauthorized());
+
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: 'access-b',
+        refreshToken: 'refresh-b',
+        sessionRevision: 2,
+        isTerminating: false
+      });
+    } finally {
+      await act(async () => jest.runAllTimersAsync());
+      jest.useRealTimers();
+    }
   });
 
   it('never renders the previous user while a new revision is unresolved', async () => {

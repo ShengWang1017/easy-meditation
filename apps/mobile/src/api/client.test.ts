@@ -127,6 +127,56 @@ describe('apiRequest', () => {
     });
   });
 
+  it('parses an integer-seconds Retry-After header into milliseconds', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'retry-after': '17' }),
+        json: async () => ({
+          data: null,
+          error: { code: 'RATE_LIMITED', message: 'Too many requests.' }
+        })
+      })
+    );
+
+    await expect(apiRequest('/practice-sessions', { skipAuth: true })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 429,
+      code: 'RATE_LIMITED',
+      retryAfterMs: 17_000
+    });
+  });
+
+  it('parses an HTTP-date Retry-After header relative to the response time', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-10T12:00:00.000Z'));
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 429,
+          headers: new Headers({
+            'retry-after': new Date('2026-07-10T12:01:30.000Z').toUTCString()
+          }),
+          json: async () => ({
+            data: null,
+            error: { code: 'RATE_LIMITED', message: 'Too many requests.' }
+          })
+        })
+      );
+
+      await expect(apiRequest('/practice-sessions', { skipAuth: true })).rejects.toMatchObject({
+        status: 429,
+        retryAfterMs: 90_000
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('refreshes an expired access token and retries the authenticated request once', async () => {
     useAuthStore.setState({
       accessToken: 'expired-access',
