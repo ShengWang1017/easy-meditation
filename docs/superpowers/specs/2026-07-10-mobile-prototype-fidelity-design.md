@@ -2,7 +2,7 @@
 
 Date: 2026-07-10
 
-Status: Approved in conversation; pending written-spec review before implementation planning.
+Status: Approved. Implementation plan: `docs/superpowers/plans/2026-07-10-mobile-prototype-fidelity.md`.
 
 ## Goal
 
