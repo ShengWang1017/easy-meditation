@@ -7,9 +7,15 @@ const VIEWPORTS = {
   '390x844': { width: 390, height: 844 },
   '412x915': { width: 412, height: 915 }
 };
+const NATIVE_ONLY_STATES = new Set(['login', 'register']);
 
 export function buildWebCapturePlan({ state, url, viewport, outputPath }) {
   getVisualQaState(state);
+  if (NATIVE_ONLY_STATES.has(state)) {
+    throw new Error(
+      `${state} has no approved Web reference; capture it natively only.`
+    );
+  }
 
   let parsedUrl;
   try {

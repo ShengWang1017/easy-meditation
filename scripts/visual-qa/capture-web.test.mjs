@@ -9,6 +9,20 @@ import {
   executeWebCapturePlan
 } from './capture-web.mjs';
 
+const WEB_REFERENCE_STATES = [
+  'practice',
+  'guide',
+  'custom',
+  'session-ready',
+  'session-inhale',
+  'session-hold',
+  'session-exhale',
+  'session-paused',
+  'session-completed',
+  'records-empty',
+  'records-populated'
+];
+
 test('validates loopback URL, approved viewport, state, and PNG output path', () => {
   assert.deepEqual(
     buildWebCapturePlan({
@@ -56,6 +70,44 @@ test('validates loopback URL, approved viewport, state, and PNG output path', ()
       }),
     /Web capture output must be a PNG path/
   );
+});
+
+test('builds plans for all 11 states with approved Web references', () => {
+  for (const state of WEB_REFERENCE_STATES) {
+    const outputPath = `/tmp/${state}.png`;
+    assert.deepEqual(
+      buildWebCapturePlan({
+        state,
+        url: `http://127.0.0.1:60323/?visualQaState=${state}`,
+        viewport: '390x844',
+        outputPath
+      }),
+      {
+        state,
+        url: `http://127.0.0.1:60323/?visualQaState=${state}`,
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 1,
+        outputPath
+      }
+    );
+  }
+});
+
+test('rejects login and register as native-only Web capture states', () => {
+  for (const state of ['login', 'register']) {
+    assert.throws(
+      () =>
+        buildWebCapturePlan({
+          state,
+          url: `http://127.0.0.1:60323/?visualQaState=${state}`,
+          viewport: '390x844',
+          outputPath: `/tmp/${state}.png`
+        }),
+      new RegExp(
+        `${state} has no approved Web reference; capture it natively only`
+      )
+    );
+  }
 });
 
 test('drives capture only through an injected Playwright-shaped adapter', async () => {
