@@ -8,6 +8,7 @@ const FONT_BASE =
 const CONTENTS_BASE =
   'https://api.github.com/repos/lxgw/LxgwWenKai/contents';
 const RAW_FETCH_TIMEOUT_MS = 10_000;
+const CONTENTS_FETCH_TIMEOUT_MS = 120_000;
 const FALLBACK_CHUNK_BYTES = 5 * 1024 * 1024;
 
 export const FONT_FILES = Object.freeze({
@@ -53,7 +54,11 @@ function contentsUrl(rawUrl) {
 async function fetchContentsFallback(filename, url) {
   const fallbackUrl = contentsUrl(url);
   const headers = { Accept: 'application/vnd.github.raw+json' };
-  const headResponse = await fetch(fallbackUrl, { headers, method: 'HEAD' });
+  const headResponse = await fetch(fallbackUrl, {
+    headers,
+    method: 'HEAD',
+    signal: AbortSignal.timeout(CONTENTS_FETCH_TIMEOUT_MS)
+  });
 
   if (!headResponse.ok) {
     throw new HttpResponseError(
@@ -77,7 +82,8 @@ async function fetchContentsFallback(filename, url) {
   const chunks = await Promise.all(
     ranges.map(async ({ start, end }) => {
       const response = await fetch(fallbackUrl, {
-        headers: { ...headers, Range: `bytes=${start}-${end}` }
+        headers: { ...headers, Range: `bytes=${start}-${end}` },
+        signal: AbortSignal.timeout(CONTENTS_FETCH_TIMEOUT_MS)
       });
 
       if (response.status !== 206) {
