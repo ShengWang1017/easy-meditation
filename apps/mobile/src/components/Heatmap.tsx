@@ -1,143 +1,233 @@
-import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { colors, radii, shadowSoft, spacing, type } from '../theme/tokens';
+import { StyleSheet, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+import type { HeatmapDay } from '../domain/records';
+import { AppText } from './AppText';
 
-// Intensity ramp: empty grey → teal → violet (level 4), mirroring the prototype.
-const LEVELS = ['#e7ebea', '#cfe9e1', '#a4d9ca', '#83c4d3', '#b3a4e6'];
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'] as const;
+const LEVEL_COLORS = [
+  'rgba(229, 239, 242, 0.76)',
+  'rgba(190, 233, 223, 0.72)',
+  'rgba(132, 218, 204, 0.76)',
+  'rgba(91, 191, 189, 0.82)'
+] as const;
+const MAX_LEVEL_COLORS = [
+  'rgba(42, 143, 153, 0.88)',
+  'rgba(133, 112, 207, 0.78)'
+] as const;
 
-function dayKey(date: Date): string {
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-}
-
-type HeatmapProps = {
-  sessions: { startedAt: string }[];
+export type HeatmapProps = {
+  days: HeatmapDay[];
+  serverListTruncated: boolean;
 };
 
-export function Heatmap({ sessions }: HeatmapProps) {
-  const { cells } = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const session of sessions) {
-      const key = dayKey(new Date(session.startedAt));
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-
-    const today = new Date();
-    const days: ({ level: number } | null)[] = [];
-
-    const first = new Date(today);
-    first.setDate(today.getDate() - 27);
-    const leadingPad = (first.getDay() + 6) % 7; // align columns to Monday-first
-    for (let i = 0; i < leadingPad; i += 1) {
-      days.push(null);
-    }
-
-    for (let offset = 27; offset >= 0; offset -= 1) {
-      const day = new Date(today);
-      day.setDate(today.getDate() - offset);
-      const count = counts.get(dayKey(day)) ?? 0;
-      days.push({ level: Math.min(4, count) });
-    }
-
-    return { cells: days };
-  }, [sessions]);
+export function Heatmap({ days, serverListTruncated }: HeatmapProps) {
+  const practicedDays = days.filter((day) => day.durationSeconds > 0).length;
+  const bestDay = days.reduce<HeatmapDay | null>(
+    (best, day) =>
+      best === null || day.durationSeconds > best.durationSeconds ? day : best,
+    null
+  );
+  const hasBestDay = Boolean(bestDay && bestDay.durationSeconds > 0);
 
   return (
-    <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>热力日历</Text>
-        <Text style={styles.caption}>近 28 天</Text>
+    <View style={styles.card} testID="records-heatmap">
+      <View style={styles.header}>
+        <View style={styles.headerCopy}>
+          <AppText accessibilityRole="header" style={styles.title} variant="cardTitle">
+            热力日历
+          </AppText>
+          <AppText style={styles.supporting} tone="muted" variant="meta">
+            近 28 天
+          </AppText>
+        </View>
+        <View style={styles.practicedBadge}>
+          <AppText style={styles.practicedLabel}>{practicedDays} 天练习</AppText>
+        </View>
       </View>
 
-      <View style={styles.weekRow}>
-        {WEEKDAYS.map((label) => (
-          <Text key={label} style={styles.weekLabel}>
-            {label}
-          </Text>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={styles.weekdays}
+        testID="heatmap-weekdays"
+      >
+        {WEEKDAYS.map((weekday) => (
+          <AppText key={weekday} style={styles.weekday} tone="muted" variant="meta">
+            {weekday}
+          </AppText>
         ))}
       </View>
 
       <View style={styles.grid}>
-        {cells.map((cell, index) => (
-          <View key={index} style={styles.cellWrap}>
-            <View
-              style={[
-                styles.cell,
-                { backgroundColor: cell ? LEVELS[cell.level] : 'transparent' }
-              ]}
-            />
+        {days.map((day) => (
+          <View
+            accessibilityLabel={`${day.label}，${
+              day.durationSeconds > 0 ? day.durationLabel : '未练习'
+            }，${day.sessions} 次`}
+            accessibilityRole="text"
+            accessible
+            key={day.key}
+            style={styles.cellSlot}
+            testID={`heatmap-day-${day.key}`}
+          >
+            {day.level === 4 ? (
+              <LinearGradient
+                colors={[...MAX_LEVEL_COLORS]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.dayCell}
+                testID={`heatmap-day-fill-${day.key}`}
+              >
+                <AppText style={[styles.dayNumber, styles.dayNumberMaximum]}>
+                  {day.day}
+                </AppText>
+              </LinearGradient>
+            ) : (
+              <View
+                style={[
+                  styles.dayCell,
+                  { backgroundColor: LEVEL_COLORS[day.level] }
+                ]}
+                testID={`heatmap-day-fill-${day.key}`}
+              >
+                <AppText
+                  style={[
+                    styles.dayNumber,
+                    day.level === 0
+                      ? styles.dayNumberEmpty
+                      : styles.dayNumberPracticed
+                  ]}
+                >
+                  {day.day}
+                </AppText>
+              </View>
+            )}
           </View>
         ))}
       </View>
 
-      <View style={styles.legendRow}>
-        <Text style={styles.caption}>少</Text>
-        {LEVELS.map((color, index) => (
-          <View key={index} style={[styles.legendCell, { backgroundColor: color }]} />
-        ))}
-        <Text style={styles.caption}>多</Text>
+      <View style={styles.footer}>
+        <AppText style={styles.supporting} tone="muted" variant="meta">
+          最长一格
+        </AppText>
+        <AppText numberOfLines={1} style={styles.bestDay}>
+          {hasBestDay && bestDay
+            ? `${bestDay.label} · ${bestDay.durationLabel}`
+            : '从今天开始'}
+        </AppText>
       </View>
+
+      {serverListTruncated ? (
+        <AppText style={styles.qualifier} tone="muted" variant="meta">
+          基于最近 50 条记录
+        </AppText>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    backgroundColor: colors.surface,
+    gap: 9,
+    paddingTop: 13,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.6)',
-    ...shadowSoft
+    borderColor: 'rgba(255, 255, 255, 0.68)',
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.62)',
+    boxShadow: '0 16px 34px rgba(86, 121, 148, 0.08)'
   },
-  headerRow: {
+  header: {
+    alignItems: 'center',
     flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md
+    gap: 12,
+    justifyContent: 'space-between'
+  },
+  headerCopy: {
+    gap: 3
   },
   title: {
-    ...type.section,
-    color: colors.ink
+    fontSize: 17,
+    fontWeight: '800',
+    lineHeight: 17
   },
-  caption: {
-    ...type.meta,
-    color: colors.muted
+  supporting: {
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 12
   },
-  weekRow: {
-    flexDirection: 'row',
-    marginBottom: spacing.xs
+  practicedBadge: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(162, 139, 221, 0.14)',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 26,
+    paddingHorizontal: 10
   },
-  weekLabel: {
-    ...type.meta,
-    width: `${100 / 7}%`,
+  practicedLabel: {
+    color: '#6c5ca6',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14
+  },
+  weekdays: {
+    flexDirection: 'row'
+  },
+  weekday: {
+    color: '#7c8794',
+    fontSize: 10,
+    lineHeight: 10,
     textAlign: 'center',
-    color: colors.muted
+    width: `${100 / 7}%`
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap'
   },
-  cellWrap: {
-    width: `${100 / 7}%`,
-    aspectRatio: 1,
-    padding: 3
+  cellSlot: {
+    padding: 3,
+    width: `${100 / 7}%`
   },
-  cell: {
-    flex: 1,
-    borderRadius: 7
-  },
-  legendRow: {
-    flexDirection: 'row',
+  dayCell: {
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 4,
-    marginTop: spacing.md
+    aspectRatio: 1,
+    borderRadius: 9,
+    justifyContent: 'center'
   },
-  legendCell: {
-    width: 14,
-    height: 14,
-    borderRadius: 4
+  dayNumber: {
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 12
+  },
+  dayNumberEmpty: {
+    color: 'rgba(82, 96, 108, 0.46)'
+  },
+  dayNumberPracticed: {
+    color: '#176b70'
+  },
+  dayNumberMaximum: {
+    color: '#f7ffff'
+  },
+  footer: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    paddingTop: 2
+  },
+  bestDay: {
+    color: '#376a73',
+    flexShrink: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14
+  },
+  qualifier: {
+    color: '#7a8490',
+    fontSize: 10,
+    lineHeight: 12,
+    textAlign: 'right'
   }
 });
