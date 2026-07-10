@@ -80,7 +80,7 @@ export function parseAndroidFrameStats(text) {
   const flagsIndex = columns.indexOf('Flags');
   const intendedVsyncIndex = columns.indexOf('IntendedVsync');
   const frameCompletedIndex = columns.indexOf('FrameCompleted');
-  const durationsMs = [];
+  const intendedVsyncTimestamps = [];
 
   for (const line of lines.slice(headerIndex + 1)) {
     const values = line.split(',').map((value) => value.trim());
@@ -97,14 +97,24 @@ export function parseAndroidFrameStats(text) {
     ) {
       continue;
     }
-    const durationMs = (frameCompleted - intendedVsync) / 1_000_000;
+    intendedVsyncTimestamps.push(intendedVsync);
+  }
+
+  const durationsMs = [];
+  for (let index = 1; index < intendedVsyncTimestamps.length; index += 1) {
+    const durationMs =
+      (intendedVsyncTimestamps[index] -
+        intendedVsyncTimestamps[index - 1]) /
+      1_000_000;
     if (durationMs > 0 && Number.isFinite(durationMs)) {
       durationsMs.push(durationMs);
     }
   }
 
   if (durationsMs.length === 0) {
-    throw new Error('Android framestats contains no usable frame rows');
+    throw new Error(
+      'Android framestats contains no usable frame cadence intervals'
+    );
   }
   return durationsMs;
 }

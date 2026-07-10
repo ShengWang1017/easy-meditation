@@ -73,13 +73,33 @@ test('parses a JSON millisecond array or Android framestats text', () => {
   const framestats = `
 ---PROFILEDATA---
 Flags,IntendedVsync,FrameCompleted
-0,1000000000,1016000000
-1,2000000000,2017000000
-0,3000000000,3020500000
+0,1000000000,1020000000
+0,1016000000,1036000000
+0,1036500000,1056500000
+1,1052500000,1072500000
 ---PROFILEDATA---
 `;
   assert.deepEqual(parseAndroidFrameStats(framestats), [16, 20.5]);
   assert.deepEqual(parseFrameInput(framestats), [16, 20.5]);
+});
+
+test('derives Android FPS from scheduling cadence rather than render latency', () => {
+  const header = 'Flags,IntendedVsync,FrameCompleted';
+  const cadenceNs = 16_666_667;
+  const renderLatencyNs = 20_000_000;
+  const rows = Array.from({ length: 60 }, (_, index) => {
+    const intendedVsync = 1_000_000_000 + index * cadenceNs;
+    return `0,${intendedVsync},${intendedVsync + renderLatencyNs}`;
+  });
+
+  const cadenceDurations = parseAndroidFrameStats(
+    [header, ...rows].join('\n')
+  );
+  const result = analyzeFrameDurations(cadenceDurations);
+
+  assert.equal(cadenceDurations.length, 59);
+  assert.ok(Math.abs(result.averageFps - 60) < 0.001);
+  assert.ok(Math.abs(result.averageFps - 50) > 1);
 });
 
 test('rejects framestats without the required columns or usable rows', () => {
@@ -92,7 +112,7 @@ test('rejects framestats without the required columns or usable rows', () => {
       parseAndroidFrameStats(
         'Flags,IntendedVsync,FrameCompleted\n1,1000000000,1016000000'
       ),
-    /Android framestats contains no usable frame rows/
+    /Android framestats contains no usable frame cadence intervals/
   );
 });
 

@@ -18,3 +18,22 @@ test('qa:perf:ios passes extractor output into the frame gate', async () => {
     'node scripts/perf/extract-ios-core-animation.mjs --device "$IOS_DEVICE_UDID" --trace "$IOS_TRACE_PATH" --toc "$PWD/qa/perf/ios-core-animation-toc.xml" --table "$PWD/qa/perf/ios-core-animation-table.xml" --output "$PWD/qa/perf/ios-frame-durations.json" && node scripts/perf/analyze-frames.mjs "$PWD/qa/perf/ios-frame-durations.json"'
   );
 });
+
+test('host fixture and tooling scripts build the shared schema package first', async () => {
+  const repositoryRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../..'
+  );
+  const packageJson = JSON.parse(
+    await readFile(path.join(repositoryRoot, 'package.json'), 'utf8')
+  );
+
+  assert.equal(
+    packageJson.scripts['pretest:tooling'],
+    'npm --prefix packages/shared run build'
+  );
+  assert.equal(
+    packageJson.scripts['preqa:fixture:validate'],
+    'npm --prefix packages/shared run build'
+  );
+});

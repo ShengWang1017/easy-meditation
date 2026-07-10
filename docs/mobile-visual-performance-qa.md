@@ -13,9 +13,10 @@ result can be called acceptance evidence.
   `2026-07-10T12:00:00+08:00`, contains a `.invalid` user, the three built-in
   methods, empty/populated records, user-scoped preferences, one local custom
   ledger row, and explicit auth/session state for all 13 capture states.
-- The fixture validator requires the exact state whitelist, rejects a global
-  preference key, rejects `durationOverrides.custom`, and rejects secret-like
-  keys such as access tokens, refresh tokens, passwords, or authorization.
+- The fixture validator applies the shared API schemas, checks empty/populated
+  stats against their session rows, enforces the native preference/ledger
+  invariants, and rejects normalized token, password, authorization, cookie,
+  API-key, private-key, and client-secret key families.
 - `scripts/visual-qa/states.mjs` defines the exact Web/native URLs and element
   manifests for the 13 states.
 - The comparison engine normalizes safe-area coordinates, aligns horizontal
@@ -23,8 +24,11 @@ result can be called acceptance evidence.
   and pixel diff, and evaluates geometry, typography, and exact-check gates.
 - Native and Web capture modules expose validated plans and adapter-injected
   orchestration. Tests use fake adapters. Native command builders require an
-  explicit Android serial or iOS UDID and read logs only from a supplied launch
-  timestamp. They never construct `logcat -c`, `log erase`, or `booted` calls.
+  explicit Android serial or iOS UDID. Immediately before Android launch, the
+  adapter reads the device-local `MM-DD HH:MM:SS.mmm` timestamp and supplies it
+  to `logcat -T`; iOS retains the explicit host ISO timestamp. Raw, normalized,
+  and metrics parent directories are created before capture. The plans never
+  construct `logcat -c`, `log erase`, or `booted` calls.
 - Android framestats/JSON duration analysis and fixed-schema iOS Core Animation
   XML extraction have deterministic Node tests and nonzero gate exit codes.
 
@@ -40,6 +44,12 @@ Analyze already-collected Android data with:
 ```bash
 npm run qa:perf:android -- /absolute/path/to/android-framestats.txt
 ```
+
+Android framestats FPS is derived from deltas between consecutive
+`IntendedVsync` scheduling timestamps for usable rows (`Flags=0` with a finite
+`FrameCompleted`). `FrameCompleted - IntendedVsync` is render latency and is
+not treated as frame cadence. The same cadence intervals feed the strictly
+over-50ms consecutive-frame gate.
 
 The iOS extractor requires an existing trace plus explicit paths and device
 identity. It only exports an already-collected trace; it does not record one:

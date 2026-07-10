@@ -99,6 +99,150 @@ test('rejects invalid session progress and secret-like fixture keys', async () =
   );
 });
 
+test('validates API fixtures through the shared contract schemas', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+
+  const invalidMe = structuredClone(fixture);
+  invalidMe.api.me.id = 'not-a-uuid';
+  assert.throws(
+    () => validateVisualQaFixture(invalidMe),
+    /Fixture api\.me must match the shared me schema/
+  );
+
+  const invalidMethod = structuredClone(fixture);
+  invalidMethod.api.methods[0].phases[0].durationSeconds = 0;
+  assert.throws(
+    () => validateVisualQaFixture(invalidMethod),
+    /Fixture api\.methods must match the shared breathing method schema/
+  );
+
+  const invalidStats = structuredClone(fixture);
+  invalidStats.api.stats.populated.totalSessions = -1;
+  assert.throws(
+    () => validateVisualQaFixture(invalidStats),
+    /Fixture api\.stats\.populated must match the shared stats summary schema/
+  );
+
+  const invalidSessions = structuredClone(fixture);
+  invalidSessions.api.sessions.populated[0].actualDurationSeconds = 0;
+  assert.throws(
+    () => validateVisualQaFixture(invalidSessions),
+    /Fixture api\.sessions\.populated must match the shared practice session schema/
+  );
+});
+
+test('rejects invalid custom rhythm, override, and preference scalar values', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+
+  const invalidPhase = structuredClone(fixture);
+  invalidPhase.preferences.customRhythm.inhaleSeconds = 13;
+  assert.throws(
+    () => validateVisualQaFixture(invalidPhase),
+    /Fixture preferences\.customRhythm\.inhaleSeconds must be an integer between 1 and 12/
+  );
+
+  const stringOverride = structuredClone(fixture);
+  stringOverride.preferences.durationOverrides.box = '5';
+  assert.throws(
+    () => validateVisualQaFixture(stringOverride),
+    /Fixture preferences\.durationOverrides\.box must be an integer between 1 and 60/
+  );
+
+  const invalidBoolean = structuredClone(fixture);
+  invalidBoolean.preferences.soundEnabled = 'true';
+  assert.throws(
+    () => validateVisualQaFixture(invalidBoolean),
+    /Fixture preferences\.soundEnabled must be a boolean/
+  );
+});
+
+test('rejects inconsistent local ledger discriminants and retry metadata', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+
+  const inconsistentCustom = structuredClone(fixture);
+  inconsistentCustom.preferences.localSessionLedger[0].methodType = 'built_in';
+  inconsistentCustom.preferences.localSessionLedger[0].methodId = 'box';
+  assert.throws(
+    () => validateVisualQaFixture(inconsistentCustom),
+    /Fixture preferences\.localSessionLedger\[0\] custom rows require custom method fields/
+  );
+
+  const inconsistentRetry = structuredClone(fixture);
+  Object.assign(inconsistentRetry.preferences.localSessionLedger[0], {
+    origin: 'built_in',
+    state: 'retry-paused',
+    methodType: 'built_in',
+    methodId: 'box',
+    attemptCount: 4,
+    nextAttemptAt: null,
+    lastErrorCode: 'NETWORK_ERROR'
+  });
+  assert.throws(
+    () => validateVisualQaFixture(inconsistentRetry),
+    /Fixture preferences\.localSessionLedger\[0\] retry-paused rows require attemptCount 5/
+  );
+});
+
+test('requires empty and populated stats to agree with their session fixtures', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+
+  const reorderedRecent = structuredClone(fixture);
+  reorderedRecent.api.stats.populated.recentSessions[0] = Object.fromEntries(
+    Object.entries(
+      reorderedRecent.api.stats.populated.recentSessions[0]
+    ).reverse()
+  );
+  assert.doesNotThrow(() => validateVisualQaFixture(reorderedRecent));
+
+  const nonEmptyEmptyStats = structuredClone(fixture);
+  nonEmptyEmptyStats.api.stats.empty.totalSessions = 1;
+  assert.throws(
+    () => validateVisualQaFixture(nonEmptyEmptyStats),
+    /Fixture empty stats and sessions must contain only zero totals and no rows/
+  );
+
+  const inconsistentPopulated = structuredClone(fixture);
+  inconsistentPopulated.api.stats.populated.totalPracticeSeconds = 301;
+  assert.throws(
+    () => validateVisualQaFixture(inconsistentPopulated),
+    /Fixture populated stats totals must match populated sessions/
+  );
+
+  const missingRecentSession = structuredClone(fixture);
+  missingRecentSession.api.stats.populated.recentSessions[0].clientSessionId =
+    '55555555-5555-4555-8555-555555555555';
+  assert.throws(
+    () => validateVisualQaFixture(missingRecentSession),
+    /Fixture populated recentSessions must reference populated sessions/
+  );
+});
+
+test('normalizes secret-like key spelling without flagging clientSessionId', async () => {
+  const fixture = await loadVisualQaFixture(fixturePath);
+  const allowed = structuredClone(fixture);
+  allowed.api.metadata = { clientSessionId: 'synthetic-reference' };
+  assert.doesNotThrow(() => validateVisualQaFixture(allowed));
+
+  for (const key of [
+    'idToken',
+    'authToken',
+    'apiKey',
+    'clientSecret',
+    'access_token',
+    'cookie'
+  ]) {
+    const secretBearing = structuredClone(fixture);
+    secretBearing.api.metadata = { [key]: 'must-not-exist' };
+    assert.throws(
+      () => validateVisualQaFixture(secretBearing),
+      new RegExp(
+        `Fixture contains forbidden secret-like key: api\\.metadata\\.${key}`
+      ),
+      key
+    );
+  }
+});
+
 test('rejects a global preference key or a custom duration override', async () => {
   const fixture = await loadVisualQaFixture(fixturePath);
   const globalKey = structuredClone(fixture);

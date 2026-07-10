@@ -222,6 +222,14 @@ function validateScreenshotPath(rawScreenshotPath) {
   }
 }
 
+function validateOutputPath(outputPath) {
+  if (!path.isAbsolute(outputPath) || path.extname(outputPath) !== '.png') {
+    throw new Error(
+      'Native normalized screenshot must be an absolute PNG path'
+    );
+  }
+}
+
 function validateAndroidSerial(serial) {
   if (
     typeof serial !== 'string' ||
@@ -246,16 +254,26 @@ function validateIosUdid(udid) {
 export function buildAndroidCaptureCommands({
   serial,
   nativeUrl,
-  since,
   rawScreenshotPath,
   packageName = 'com.easymeditation.app'
 }) {
   validateAndroidSerial(serial);
   validateNativeUrl(nativeUrl);
-  validateSince(since);
   validateScreenshotPath(rawScreenshotPath);
 
   return {
+    platform: 'android',
+    serial,
+    readTimestamp: {
+      command: 'adb',
+      args: [
+        '-s',
+        serial,
+        'shell',
+        'date',
+        '+%m-%d %H:%M:%S.000'
+      ]
+    },
     launch: {
       command: 'adb',
       args: [
@@ -272,26 +290,54 @@ export function buildAndroidCaptureCommands({
         packageName
       ]
     },
-    readLog: {
-      command: 'adb',
-      args: [
-        '-s',
-        serial,
-        'logcat',
-        '-d',
-        '-v',
-        'raw',
-        '-T',
-        since,
-        'ReactNativeJS:I',
-        '*:S'
-      ]
-    },
     screenshot: {
       command: 'adb',
       args: ['-s', serial, 'exec-out', 'screencap', '-p'],
       stdoutPath: rawScreenshotPath
     }
+  };
+}
+
+function validateAndroidLogTimestamp(output) {
+  if (typeof output !== 'string') {
+    throw new Error(
+      'Android device log timestamp must use MM-DD HH:MM:SS.mmm'
+    );
+  }
+  const timestamp = output.endsWith('\r\n')
+    ? output.slice(0, -2)
+    : output.endsWith('\n')
+      ? output.slice(0, -1)
+      : output;
+  if (
+    !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}$/.test(
+      timestamp
+    )
+  ) {
+    throw new Error(
+      'Android device log timestamp must use MM-DD HH:MM:SS.mmm'
+    );
+  }
+  return timestamp;
+}
+
+function buildAndroidReadLogCommand(serial, deviceTimestamp) {
+  validateAndroidSerial(serial);
+  const timestamp = validateAndroidLogTimestamp(deviceTimestamp);
+  return {
+    command: 'adb',
+    args: [
+      '-s',
+      serial,
+      'logcat',
+      '-d',
+      '-v',
+      'raw',
+      '-T',
+      timestamp,
+      'ReactNativeJS:I',
+      '*:S'
+    ]
   };
 }
 
@@ -307,6 +353,7 @@ export function buildIosCaptureCommands({
   validateScreenshotPath(rawScreenshotPath);
 
   return {
+    platform: 'ios',
     launch: {
       command: 'xcrun',
       args: ['simctl', 'openurl', udid, nativeUrl]
@@ -346,10 +393,21 @@ export async function executeNativeCapturePlan({
       throw new TypeError(`Native capture adapter.${method} is required.`);
     }
   }
+  let readLogCommand = commands.readLog;
+  if (commands.platform === 'android') {
+    const deviceTimestamp = await adapter.read(commands.readTimestamp);
+    readLogCommand = buildAndroidReadLogCommand(
+      commands.serial,
+      deviceTimestamp
+    );
+  }
+  if (!readLogCommand) {
+    throw new Error('Native capture log command is required');
+  }
   await adapter.run(commands.launch);
   const metrics = await waitForReady({
     state,
-    readLog: () => adapter.read(commands.readLog),
+    readLog: () => adapter.read(readLogCommand),
     now,
     sleep
   });
@@ -377,15 +435,18 @@ export function parseNativeCliArgs(args) {
   }
   const flags = parseFlags(args);
   const selectorFlag = platform === 'android' ? '--serial' : '--udid';
-  for (const required of [
+  const requiredFlags = [
     selectorFlag,
     '--state',
     '--url',
-    '--since',
     '--raw',
     '--output',
     '--metrics'
-  ]) {
+  ];
+  if (platform === 'ios') {
+    requiredFlags.push('--since');
+  }
+  for (const required of requiredFlags) {
     if (!flags.get(required)) {
       throw new Error(`Missing required native capture argument: ${required}`);
     }
@@ -398,19 +459,47 @@ export function parseNativeCliArgs(args) {
   }
   const state = flags.get('--state');
   getVisualQaState(state);
+  const nativeUrl = flags.get('--url');
+  const rawScreenshotPath = flags.get('--raw');
+  const outputPath = flags.get('--output');
   const metricsPath = flags.get('--metrics');
+  validateNativeUrl(nativeUrl);
+  validateScreenshotPath(rawScreenshotPath);
+  validateOutputPath(outputPath);
   validateMetricsPath(metricsPath);
+  if (platform === 'ios') {
+    validateSince(flags.get('--since'));
+  }
 
   return {
     platform,
     selector,
     state,
-    nativeUrl: flags.get('--url'),
-    since: flags.get('--since'),
-    rawScreenshotPath: flags.get('--raw'),
-    outputPath: flags.get('--output'),
+    nativeUrl,
+    since: platform === 'ios' ? flags.get('--since') : null,
+    rawScreenshotPath,
+    outputPath,
     metricsPath
   };
+}
+
+export async function prepareNativeCaptureDirectories(
+  { rawScreenshotPath, outputPath, metricsPath },
+  { makeDirectory = mkdir } = {}
+) {
+  validateScreenshotPath(rawScreenshotPath);
+  validateOutputPath(outputPath);
+  validateMetricsPath(metricsPath);
+  const directories = new Set([
+    path.dirname(rawScreenshotPath),
+    path.dirname(outputPath),
+    path.dirname(metricsPath)
+  ]);
+  await Promise.all(
+    [...directories].map((directory) =>
+      makeDirectory(directory, { recursive: true })
+    )
+  );
 }
 
 function createExecAdapter() {
@@ -438,12 +527,14 @@ function createExecAdapter() {
 
 export async function main(args, dependencies = {}) {
   const options = parseNativeCliArgs(args);
+  await (dependencies.prepareDirectories ?? prepareNativeCaptureDirectories)(
+    options
+  );
   const commands =
     options.platform === 'android'
       ? buildAndroidCaptureCommands({
           serial: options.selector,
           nativeUrl: options.nativeUrl,
-          since: options.since,
           rawScreenshotPath: options.rawScreenshotPath
         })
       : buildIosCaptureCommands({
@@ -470,7 +561,8 @@ export async function main(args, dependencies = {}) {
 }
 
 const directlyExecuted =
-  process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+  process.argv[1] &&
+  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (directlyExecuted) {
   main(process.argv.slice(2)).catch((error) => {

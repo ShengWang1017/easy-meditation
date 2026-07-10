@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -220,7 +220,6 @@ test('requires explicit selectors and builds non-destructive Android argv', () =
       buildAndroidCaptureCommands({
         serial: '',
         nativeUrl: 'easy-meditation:///practice?visualQaState=practice',
-        since: '2026-07-10T12:00:00.000Z',
         rawScreenshotPath: '/tmp/android.png'
       }),
     /Android serial is required/
@@ -229,15 +228,25 @@ test('requires explicit selectors and builds non-destructive Android argv', () =
   const commands = buildAndroidCaptureCommands({
     serial: 'emulator-5554',
     nativeUrl: 'easy-meditation:///practice?visualQaState=practice',
-    since: '2026-07-10T12:00:00.000Z',
     rawScreenshotPath: '/tmp/android.png'
   });
+  assert.deepEqual(commands.readTimestamp, {
+    command: 'adb',
+    args: [
+      '-s',
+      'emulator-5554',
+      'shell',
+      'date',
+      '+%m-%d %H:%M:%S.000'
+    ]
+  });
   assert.deepEqual(commands.launch.args.slice(0, 2), ['-s', 'emulator-5554']);
-  assert.deepEqual(commands.readLog.args.slice(0, 2), ['-s', 'emulator-5554']);
-  assert.ok(commands.readLog.args.includes('-T'));
-  assert.ok(commands.readLog.args.includes('2026-07-10T12:00:00.000Z'));
   assert.equal(commands.screenshot.stdoutPath, '/tmp/android.png');
   assert.equal(JSON.stringify(commands).includes('logcat","-c'), false);
+  assert.equal(
+    JSON.stringify(commands).includes('2026-07-10T12:00:00.000Z'),
+    false
+  );
   assert.equal(JSON.stringify(commands).includes('booted'), false);
 });
 
@@ -273,7 +282,6 @@ test('executes a native plan only through an injected adapter', async () => {
   const commands = buildAndroidCaptureCommands({
     serial: 'emulator-5554',
     nativeUrl: 'easy-meditation:///practice?visualQaState=practice',
-    since: '2026-07-10T12:00:00.000Z',
     rawScreenshotPath: '/tmp/android.png'
   });
   const result = await executeNativeCapturePlan({
@@ -283,6 +291,9 @@ test('executes a native plan only through an injected adapter', async () => {
       run: async (command) => calls.push(['run', command]),
       read: async (command) => {
         calls.push(['read', command]);
+        if (command.args.includes('date')) {
+          return '07-10 20:00:00.000\n';
+        }
         return JSON.stringify(READY_PAYLOAD);
       },
       capture: async (command) => calls.push(['capture', command])
@@ -294,8 +305,39 @@ test('executes a native plan only through an injected adapter', async () => {
   assert.deepEqual(result, READY_PAYLOAD);
   assert.deepEqual(
     calls.map(([kind]) => kind),
-    ['run', 'read', 'capture']
+    ['read', 'run', 'read', 'capture']
   );
+  assert.deepEqual(calls[0][1], commands.readTimestamp);
+  assert.ok(calls[2][1].args.includes('-T'));
+  assert.ok(calls[2][1].args.includes('07-10 20:00:00.000'));
+  assert.equal(calls[2][1].args.includes('2026-07-10T12:00:00.000Z'), false);
+  assert.equal(JSON.stringify(calls).includes('logcat","-c'), false);
+});
+
+test('rejects an invalid Android device timestamp before launch', async () => {
+  const calls = [];
+  const commands = buildAndroidCaptureCommands({
+    serial: 'emulator-5554',
+    nativeUrl: 'easy-meditation:///practice?visualQaState=practice',
+    rawScreenshotPath: '/tmp/android.png'
+  });
+
+  await assert.rejects(
+    executeNativeCapturePlan({
+      commands,
+      state: 'practice',
+      adapter: {
+        read: async (command) => {
+          calls.push(['read', command]);
+          return '2026-07-10T12:00:00.000Z';
+        },
+        run: async (command) => calls.push(['run', command]),
+        capture: async (command) => calls.push(['capture', command])
+      }
+    }),
+    /Android device log timestamp must use MM-DD HH:MM:SS\.mmm/
+  );
+  assert.deepEqual(calls.map(([kind]) => kind), ['read']);
 });
 
 test('requires complete direct-execution arguments before an adapter can run', () => {
@@ -313,8 +355,6 @@ test('requires complete direct-execution arguments before an adapter can run', (
       'practice',
       '--url',
       'easy-meditation:///practice?visualQaState=practice',
-      '--since',
-      '2026-07-10T12:00:00.000Z',
       '--raw',
       '/tmp/raw.png',
       '--output',
@@ -327,11 +367,31 @@ test('requires complete direct-execution arguments before an adapter can run', (
       selector: 'emulator-5554',
       state: 'practice',
       nativeUrl: 'easy-meditation:///practice?visualQaState=practice',
-      since: '2026-07-10T12:00:00.000Z',
+      since: null,
       rawScreenshotPath: '/tmp/raw.png',
       outputPath: '/tmp/logical.png',
       metricsPath: '/tmp/native-metrics.json'
     }
+  );
+
+  assert.throws(
+    () =>
+      parseNativeCliArgs([
+        'ios',
+        '--udid',
+        '00008110-001234567890001E',
+        '--state',
+        'practice',
+        '--url',
+        'easy-meditation:///practice?visualQaState=practice',
+        '--raw',
+        '/tmp/raw.png',
+        '--output',
+        '/tmp/logical.png',
+        '--metrics',
+        '/tmp/native-metrics.json'
+      ]),
+    /Missing required native capture argument: --since/
   );
 });
 
@@ -380,45 +440,81 @@ test('writes deterministic READY metrics and creates the parent directory', asyn
   }
 });
 
-test('native CLI persists READY metrics through injected host adapters', async () => {
-  const calls = [];
-  const metricsPath = '/tmp/easy-meditation/native-metrics.json';
-  const result = await runNativeCli(
-    [
-      'android',
-      '--serial',
-      'emulator-5554',
-      '--state',
-      'practice',
-      '--url',
-      'easy-meditation:///practice?visualQaState=practice',
-      '--since',
-      '2026-07-10T12:00:00.000Z',
-      '--raw',
-      '/tmp/raw.png',
-      '--output',
-      '/tmp/logical.png',
-      '--metrics',
-      metricsPath
-    ],
-    {
-      adapter: {
-        run: async () => calls.push('run'),
-        read: async () => {
-          calls.push('read');
-          return JSON.stringify(READY_PAYLOAD);
-        },
-        capture: async () => calls.push('capture')
-      },
-      normalize: async () => calls.push('normalize'),
-      writeMetrics: async (filePath, payload) => {
-        calls.push('metrics');
-        assert.equal(filePath, metricsPath);
-        assert.deepEqual(payload, READY_PAYLOAD);
-      }
-    }
+test('native CLI prepares fresh raw, normalized, and metrics directories before capture', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'easy-meditation-cli-'));
+  const rawPath = path.join(directory, 'raw', 'android', 'practice.png');
+  const outputPath = path.join(
+    directory,
+    'normalized',
+    'android',
+    'practice.png'
   );
+  const metricsPath = path.join(
+    directory,
+    'metrics',
+    'android',
+    'practice.json'
+  );
+  const calls = [];
+  try {
+    const result = await runNativeCli(
+      [
+        'android',
+        '--serial',
+        'emulator-5554',
+        '--state',
+        'practice',
+        '--url',
+        'easy-meditation:///practice?visualQaState=practice',
+        '--raw',
+        rawPath,
+        '--output',
+        outputPath,
+        '--metrics',
+        metricsPath
+      ],
+      {
+        adapter: {
+          run: async () => calls.push('run'),
+          read: async (command) => {
+            calls.push(command.args.includes('date') ? 'timestamp' : 'log');
+            return command.args.includes('date')
+              ? '07-10 20:00:00.000\n'
+              : JSON.stringify(READY_PAYLOAD);
+          },
+          capture: async (command) => {
+            calls.push('capture');
+            await access(path.dirname(rawPath));
+            await access(path.dirname(outputPath));
+            await access(path.dirname(metricsPath));
+            await writeFile(command.stdoutPath, 'android-png-stdout');
+          }
+        },
+        normalize: async (rawScreenshotPath, normalizedPath) => {
+          calls.push('normalize');
+          assert.equal(
+            await readFile(rawScreenshotPath, 'utf8'),
+            'android-png-stdout'
+          );
+          await writeFile(normalizedPath, 'normalized-png');
+        }
+      }
+    );
 
-  assert.deepEqual(result, READY_PAYLOAD);
-  assert.deepEqual(calls, ['run', 'read', 'capture', 'normalize', 'metrics']);
+    assert.deepEqual(result, READY_PAYLOAD);
+    assert.deepEqual(calls, [
+      'timestamp',
+      'run',
+      'log',
+      'capture',
+      'normalize'
+    ]);
+    assert.equal(await readFile(outputPath, 'utf8'), 'normalized-png');
+    assert.equal(
+      await readFile(metricsPath, 'utf8'),
+      `${JSON.stringify(READY_PAYLOAD, null, 2)}\n`
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
