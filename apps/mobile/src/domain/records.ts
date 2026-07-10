@@ -60,6 +60,7 @@ export function deriveMergedRecords(options: {
   const nowMs = options.now.getTime();
   const weeklyLowerBound = nowMs - ROLLING_WEEK_MS;
 
+  // Summary owns server aggregates; visible rows are only the degraded fallback.
   const baseTotals = options.summary
     ? {
         totalSessions: options.summary.totalSessions,
@@ -86,7 +87,7 @@ export function deriveMergedRecords(options: {
         isWithinRollingWeek(session.endedAt, weeklyLowerBound, nowMs)
       )
     );
-  const dayBuckets = bucketLocalDays(sessions);
+  const dayBuckets = bucketLocalDays(sessions, nowMs);
   const calendarDays = buildCalendarDays(dayBuckets, options.now);
   const streakDays = getCurrentStreakDays(dayBuckets, options.now);
   const serverListTruncated = options.serverSessions?.length === 50;
@@ -240,12 +241,14 @@ function isWithinRollingWeek(
 type DayBucket = { durationSeconds: number; sessions: number };
 
 function bucketLocalDays(
-  sessions: MergedRecordSession[]
+  sessions: MergedRecordSession[],
+  upperBound: number
 ): Map<string, DayBucket> {
   const buckets = new Map<string, DayBucket>();
   for (const session of sessions) {
     const endedAt = new Date(session.endedAt);
-    if (!Number.isFinite(endedAt.getTime())) continue;
+    const timestamp = endedAt.getTime();
+    if (!Number.isFinite(timestamp) || timestamp > upperBound) continue;
     const key = localDateKey(endedAt);
     const current = buckets.get(key) ?? { durationSeconds: 0, sessions: 0 };
     buckets.set(key, {

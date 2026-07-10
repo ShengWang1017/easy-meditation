@@ -97,6 +97,14 @@ export default function RecordsScreen() {
     }
   }
 
+  if (refreshing && !hasLocalData && !hasServerData) {
+    return (
+      <RecordsStateScreen>
+        <InlineState kind="loading" message="正在重新加载练习记录…" />
+      </RecordsStateScreen>
+    );
+  }
+
   if (isInitiallyLoading) {
     return (
       <RecordsStateScreen>

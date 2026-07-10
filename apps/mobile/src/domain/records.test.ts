@@ -332,6 +332,56 @@ describe('deriveMergedRecords', () => {
     expect(result.weeklyPracticeSeconds).toBe(180);
   });
 
+  it('keeps future ledger rows in totals and the session list but not the heatmap', () => {
+    process.env.TZ = 'Asia/Shanghai';
+    const now = new Date('2026-07-10T12:00:00+08:00');
+    const result = deriveMergedRecords({
+      summary: summary(),
+      serverSessions: [],
+      ledger: [
+        ledger(1, 'pending', {
+          actualDurationSeconds: 240,
+          endedAt: '2026-07-10T13:00:00+08:00'
+        })
+      ],
+      now
+    });
+
+    expect(result.sessions).toHaveLength(1);
+    expect(result.totalSessions).toBe(1);
+    expect(result.totalPracticeSeconds).toBe(240);
+    expect(result.calendarDays.at(-1)).toMatchObject({
+      key: '2026-07-10',
+      durationSeconds: 0,
+      sessions: 0,
+      level: 0
+    });
+  });
+
+  it("does not let a future server row seed today's streak", () => {
+    process.env.TZ = 'Asia/Shanghai';
+    const result = deriveMergedRecords({
+      summary: null,
+      serverSessions: [
+        server(1, { endedAt: '2026-07-09T12:00:00+08:00' }),
+        server(2, { endedAt: '2026-07-10T13:00:00+08:00' })
+      ],
+      ledger: [],
+      now: new Date('2026-07-10T12:00:00+08:00')
+    });
+
+    expect(result.sessions).toHaveLength(2);
+    expect(result.calendarDays.at(-2)).toMatchObject({
+      key: '2026-07-09',
+      sessions: 1
+    });
+    expect(result.streak).toEqual({
+      value: 0,
+      label: '0',
+      isLowerBound: false
+    });
+  });
+
   it('aggregates sessions and applies exact practiced-minute levels', () => {
     process.env.TZ = 'Asia/Shanghai';
     const result = deriveMergedRecords({

@@ -385,6 +385,39 @@ describe('RecordsScreen', () => {
     );
   });
 
+  it('shows accessible busy progress while a full-error retry is pending', async () => {
+    const retryStats = deferred<StatsSummary>();
+    const retrySessions = deferred<PracticeSession[]>();
+    fetchStatsMock
+      .mockRejectedValueOnce(new Error('stats offline'))
+      .mockReturnValueOnce(retryStats.promise);
+    fetchSessionsMock
+      .mockRejectedValueOnce(new Error('sessions offline'))
+      .mockReturnValueOnce(retrySessions.promise);
+    const store = await preferencesStore('user-a');
+    const view = renderRecords(store);
+
+    await waitFor(() => expect(view.getByText('暂时无法加载记录')).toBeTruthy());
+    fireEvent.press(view.getByRole('button', { name: '重新加载' }));
+
+    await waitFor(() => expect(fetchStatsMock).toHaveBeenCalledTimes(2));
+    expect(fetchSessionsMock).toHaveBeenCalledTimes(2);
+    expect(view.getByRole('progressbar').props.accessibilityState).toMatchObject({
+      busy: true
+    });
+    expect(view.getByText('正在重新加载练习记录…')).toBeTruthy();
+    expect(view.queryByRole('button', { name: '重新加载' })).toBeNull();
+
+    await act(async () => {
+      retryStats.resolve(statsSummary());
+      retrySessions.resolve([]);
+      await Promise.all([retryStats.promise, retrySessions.promise]);
+    });
+    await waitFor(() =>
+      expect(view.getByText('完成一次练习后会出现在这里')).toBeTruthy()
+    );
+  });
+
   it('keeps cached records visible on refresh errors and retries both exact queries', async () => {
     const cached = serverSession(10, { methodTitleSnapshot: '缓存练习' });
     fetchStatsMock.mockRejectedValue(new Error('stats offline'));
