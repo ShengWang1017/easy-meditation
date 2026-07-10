@@ -29,6 +29,7 @@ import { ApiRequestError } from '../api/client';
 import {
   RETRY_DELAYS_MS,
   classifySessionSubmissionError,
+  transitionAfterAcceptedCacheFailure,
   transitionAfterFailure,
   type LocalSessionLedgerEntry
 } from './sessionLedger';
@@ -219,5 +220,28 @@ describe('session retry transitions', () => {
     });
     expect(terminal).not.toHaveProperty('attemptCount');
     expect(terminal).not.toHaveProperty('nextAttemptAt');
+  });
+
+  it('backs off accepted sessions whose post-acceptance cache refresh fails', () => {
+    const nowMs = Date.parse('2026-07-10T12:00:00.000Z');
+    expect(
+      transitionAfterAcceptedCacheFailure(pendingEntry(), nowMs)
+    ).toMatchObject({
+      state: 'pending',
+      attemptCount: 1,
+      nextAttemptAt: new Date(nowMs + 5_000).toISOString(),
+      lastErrorCode: 'CACHE_REFRESH_FAILED'
+    });
+    expect(
+      transitionAfterAcceptedCacheFailure(
+        pendingEntry({ attemptCount: 4 }),
+        nowMs
+      )
+    ).toMatchObject({
+      state: 'retry-paused',
+      attemptCount: 5,
+      nextAttemptAt: null,
+      lastErrorCode: 'CACHE_REFRESH_FAILED'
+    });
   });
 });

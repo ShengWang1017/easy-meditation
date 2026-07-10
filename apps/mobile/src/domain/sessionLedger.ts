@@ -123,3 +123,32 @@ export function transitionAfterFailure(
     lastErrorCode: classification.code
   };
 }
+
+export function transitionAfterAcceptedCacheFailure(
+  entry: Extract<LocalSessionLedgerEntry, { attemptCount: number }>,
+  nowMs: number
+): Extract<LocalSessionLedgerEntry, { origin: 'built_in' }> {
+  const base = {
+    ...practiceSessionCreateSchema.parse(entry),
+    origin: 'built_in' as const
+  };
+  const attemptCount = Math.min(5, entry.attemptCount + 1);
+  if (attemptCount === 5) {
+    return {
+      ...base,
+      state: 'retry-paused',
+      attemptCount,
+      nextAttemptAt: null,
+      lastErrorCode: 'CACHE_REFRESH_FAILED'
+    };
+  }
+
+  const delay = RETRY_DELAYS_MS[attemptCount - 1] ?? RETRY_DELAYS_MS[3];
+  return {
+    ...base,
+    state: 'pending',
+    attemptCount,
+    nextAttemptAt: new Date(nowMs + delay).toISOString(),
+    lastErrorCode: 'CACHE_REFRESH_FAILED'
+  };
+}

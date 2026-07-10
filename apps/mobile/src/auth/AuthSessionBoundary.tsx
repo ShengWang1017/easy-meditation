@@ -85,11 +85,6 @@ export function AuthSessionBoundary({ children }: AuthSessionBoundaryProps) {
             }
           }
         });
-        await sessionOutbox.drainDue({ resumeAuthBlocked: true });
-        if (superseded || generationRef.current !== generation) {
-          return;
-        }
-
         setPrepared({
           revision: sessionRevision,
           user,
@@ -97,6 +92,9 @@ export function AuthSessionBoundary({ children }: AuthSessionBoundaryProps) {
           preferencesStore,
           sessionOutbox
         });
+        void sessionOutbox
+          .drainDue({ resumeAuthBlocked: true })
+          .catch(() => undefined);
       } catch (error) {
         if (!superseded && generationRef.current === generation) {
           setPreparationError(error);

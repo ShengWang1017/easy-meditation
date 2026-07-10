@@ -109,28 +109,51 @@ async function sendApiRequest<T>(
   path: string,
   options: ApiRequestOptions,
   accessToken: string | null
-): Promise<{ response: Response; body: ApiEnvelope<T> }> {
+): Promise<{ response: Response; body: ApiEnvelope<T> | null }> {
   const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
     ...options,
     headers: buildHeaders(options, accessToken)
   });
-  const body = (await response.json()) as ApiEnvelope<T>;
+  let body: ApiEnvelope<T> | null = null;
+  try {
+    body = (await response.json()) as ApiEnvelope<T>;
+  } catch {
+    // Preserve the HTTP response metadata below instead of leaking a JSON
+    // parser error that would hide a retriable 429/5xx status.
+  }
 
   return { response, body };
 }
 
-function toApiRequestError<T>(response: Response, body: ApiEnvelope<T>): ApiRequestError | null {
-  if (!body.error) {
-    return null;
+function toApiRequestError<T>(
+  response: Response,
+  body: ApiEnvelope<T> | null
+): ApiRequestError | null {
+  const envelopeError = body?.error;
+  if (
+    envelopeError &&
+    typeof envelopeError.code === 'string' &&
+    typeof envelopeError.message === 'string'
+  ) {
+    return new ApiRequestError({
+      status: response.status,
+      code: envelopeError.code,
+      message: envelopeError.message,
+      fields: envelopeError.fields,
+      retryAfterMs: parseRetryAfterMs(response)
+    });
   }
 
-  return new ApiRequestError({
-    status: response.status,
-    code: body.error.code,
-    message: body.error.message,
-    fields: body.error.fields,
-    retryAfterMs: parseRetryAfterMs(response)
-  });
+  return response.ok
+    ? null
+    : new ApiRequestError({
+        status: response.status,
+        code: Number.isInteger(response.status)
+          ? `HTTP_${response.status}`
+          : 'HTTP_ERROR',
+        message: GENERIC_REQUEST_ERROR_MESSAGE,
+        retryAfterMs: parseRetryAfterMs(response)
+      });
 }
 
 function parseRetryAfterMs(response: Response): number | undefined {
@@ -209,7 +232,7 @@ async function runRefreshTokenPair(
     throw error;
   }
 
-  if (!response.ok || body.data === null) {
+  if (!response.ok || body?.data == null) {
     throw new Error(GENERIC_REQUEST_ERROR_MESSAGE);
   }
 
@@ -300,7 +323,7 @@ export async function apiRequest<T>(
         throw retryError;
       }
 
-      if (!retry.response.ok || retry.body.data === null) {
+      if (!retry.response.ok || retry.body?.data == null) {
         throw new Error(GENERIC_REQUEST_ERROR_MESSAGE);
       }
 
@@ -314,7 +337,7 @@ export async function apiRequest<T>(
     throw firstError;
   }
 
-  if (!first.response.ok || first.body.data === null) {
+  if (!first.response.ok || first.body?.data == null) {
     throw new Error(GENERIC_REQUEST_ERROR_MESSAGE);
   }
 

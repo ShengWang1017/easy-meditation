@@ -101,6 +101,18 @@ function pendingLedgerEntry(
   };
 }
 
+function retryPausedLedgerEntry(
+  clientSessionId = '33333333-3333-4333-8333-333333333333'
+): RetryableLedgerEntry {
+  return {
+    ...pendingLedgerEntry(clientSessionId),
+    state: 'retry-paused',
+    attemptCount: 5,
+    nextAttemptAt: null,
+    lastErrorCode: 'NETWORK_ERROR'
+  };
+}
+
 function persistedPayload(state: Record<string, unknown>) {
   return JSON.stringify({ state, version: 0 });
 }
@@ -160,6 +172,49 @@ function createRejectableFirstWriteStorage() {
     storage,
     firstWriteStarted,
     rejectFirstWrite
+  };
+}
+
+function createRejectableNextWriteStorage(initial: Record<string, string>) {
+  const memory = createMemoryStorage(initial);
+  let nextWrite:
+    | {
+        promise: Promise<void>;
+        reject(reason?: unknown): void;
+        markStarted(): void;
+        started: Promise<void>;
+      }
+    | undefined;
+  const storage: StateStorage = {
+    getItem: memory.storage.getItem,
+    async setItem(name, value) {
+      memory.writes.push({ name, value });
+      const blockedWrite = nextWrite;
+      if (blockedWrite) {
+        nextWrite = undefined;
+        blockedWrite.markStarted();
+        await blockedWrite.promise;
+      }
+      memory.values.set(name, value);
+    },
+    removeItem: memory.storage.removeItem
+  };
+
+  return {
+    ...memory,
+    storage,
+    rejectNextWrite() {
+      let reject!: (reason?: unknown) => void;
+      let markStarted!: () => void;
+      const promise = new Promise<void>((_resolve, rejectPromise) => {
+        reject = rejectPromise;
+      });
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      nextWrite = { promise, reject, markStarted, started };
+      return { reject, started };
+    }
   };
 }
 
@@ -341,13 +396,7 @@ describe('user preferences persistence', () => {
     const memory = createMemoryStorage();
     const store = createUserPreferencesStore('ledger-dedupe', memory.storage);
     const original = pendingLedgerEntry();
-    const replacement: LocalSessionLedgerEntry = {
-      ...original,
-      state: 'retry-paused',
-      attemptCount: 1,
-      nextAttemptAt: '2026-07-08T11:06:00.000Z',
-      lastErrorCode: 'NETWORK_ERROR'
-    };
+    const replacement = retryPausedLedgerEntry(original.clientSessionId);
 
     await store.getState().putLedgerEntry(original);
     await store.getState().putLedgerEntry(replacement);
@@ -423,6 +472,51 @@ describe('user preferences persistence', () => {
     ]);
   });
 
+  it('never lets a concurrent preference write persist an uncommitted ledger transition', async () => {
+    const userId = 'transactional-ledger';
+    const pending = pendingLedgerEntry();
+    const memory = createRejectableNextWriteStorage({
+      [preferencesStorageKey(userId)]: persistedPayload({
+        customRhythm: { ...DEFAULT_PREFERENCES.customRhythm },
+        durationOverrides: {},
+        soundEnabled: true,
+        beforeStartDismissed: false,
+        localSessionLedger: [pending]
+      })
+    });
+    const store = createUserPreferencesStore(userId, memory.storage);
+    await hydrateUserPreferencesStore(store);
+    const blockedWrite = memory.rejectNextWrite();
+    const transition = store
+      .getState()
+      .updateLedgerEntry(pending.clientSessionId, (current) => {
+        if (!('attemptCount' in current)) throw new Error('Expected retryable row.');
+        return transitionAfterFailure(current, new TypeError('offline'), Date.now());
+      });
+    const transitionResult = transition.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await blockedWrite.started;
+
+    const soundWrite = store.getState().setSoundEnabled(false);
+    const soundStayedCommittedWhileLedgerWriteWasPending =
+      store.getState().soundEnabled;
+    blockedWrite.reject(new Error('disk unavailable'));
+
+    expect(soundStayedCommittedWhileLedgerWriteWasPending).toBe(true);
+    await expect(transitionResult).resolves.toEqual(new Error('disk unavailable'));
+    await expect(soundWrite).resolves.toBeUndefined();
+    expect(store.getState()).toMatchObject({
+      localSessionLedger: [pending],
+      soundEnabled: false
+    });
+    expect(readPersisted(memory, userId).state).toMatchObject({
+      localSessionLedger: [pending],
+      soundEnabled: false
+    });
+  });
+
   it('recovers only an invalid custom rhythm slice during hydration', async () => {
     const userId = 'bad-custom';
     const validLedger = customLedgerEntry();
@@ -487,6 +581,7 @@ describe('user preferences persistence', () => {
     const userId = 'filtered-ledger';
     const custom = customLedgerEntry();
     const pending = pendingLedgerEntry();
+    const paused = retryPausedLedgerEntry();
     const memory = createMemoryStorage({
       [preferencesStorageKey(userId)]: persistedPayload({
         customRhythm: { ...DEFAULT_PREFERENCES.customRhythm },
@@ -497,6 +592,19 @@ describe('user preferences persistence', () => {
           custom,
           { ...pending, methodType: 'custom' },
           pending,
+          { ...pending, clientSessionId: '44444444-4444-4444-8444-444444444444', attemptCount: 5 },
+          { ...paused, clientSessionId: '55555555-5555-4555-8555-555555555555', attemptCount: 4 },
+          {
+            ...paused,
+            clientSessionId: '66666666-6666-4666-8666-666666666666',
+            nextAttemptAt: '2026-07-08T11:06:00.000Z'
+          },
+          {
+            ...paused,
+            clientSessionId: '77777777-7777-4777-8777-777777777777',
+            lastErrorCode: null
+          },
+          paused,
           { clientSessionId: 'partial-row', state: 'pending' } as LocalSessionLedgerEntry
         ]
       })
@@ -505,7 +613,7 @@ describe('user preferences persistence', () => {
 
     await hydrateUserPreferencesStore(store);
 
-    expect(store.getState().localSessionLedger).toEqual([custom, pending]);
+    expect(store.getState().localSessionLedger).toEqual([custom, pending, paused]);
   });
 
   it('propagates storage reads that reject and never marks hydration successful', async () => {
@@ -541,15 +649,15 @@ describe('user preferences persistence', () => {
     const row = pendingLedgerEntry();
 
     await expect(store.getState().putLedgerEntry(row)).rejects.toThrow('disk full');
-    expect(store.getState().localSessionLedger).toEqual([row]);
+    expect(store.getState().localSessionLedger).toEqual([]);
 
     await expect(store.getState().putLedgerEntry(row)).resolves.toBeUndefined();
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(3);
     expect(
       JSON.parse(values.get(preferencesStorageKey('write-retry'))!).state.localSessionLedger
     ).toEqual([row]);
 
     await expect(store.getState().setSoundEnabled(false)).resolves.toBeUndefined();
-    expect(attempts).toBe(3);
+    expect(attempts).toBe(4);
   });
 });

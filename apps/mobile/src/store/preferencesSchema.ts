@@ -37,7 +37,7 @@ export const beforeStartDismissedSchema = z.boolean();
 const pendingLedgerEntrySchema = practiceSessionCreateSchema.extend({
   origin: z.literal('built_in'),
   state: z.literal('pending'),
-  attemptCount: z.number().int().min(0),
+  attemptCount: z.number().int().min(0).max(4),
   nextAttemptAt: z.string().datetime().nullable(),
   lastErrorCode: z.string().min(1).nullable()
 });
@@ -45,9 +45,9 @@ const pendingLedgerEntrySchema = practiceSessionCreateSchema.extend({
 const retryPausedLedgerEntrySchema = practiceSessionCreateSchema.extend({
   origin: z.literal('built_in'),
   state: z.literal('retry-paused'),
-  attemptCount: z.number().int().min(0),
-  nextAttemptAt: z.string().datetime().nullable(),
-  lastErrorCode: z.string().min(1).nullable()
+  attemptCount: z.literal(5),
+  nextAttemptAt: z.null(),
+  lastErrorCode: z.string().min(1)
 });
 
 const terminalLedgerEntrySchema = practiceSessionCreateSchema.extend({

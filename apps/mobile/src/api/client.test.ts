@@ -177,6 +177,68 @@ describe('apiRequest', () => {
     }
   });
 
+  it('preserves a retriable 429 when the response body is empty', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'retry-after': '12' }),
+        json: async () => {
+          throw new SyntaxError('Unexpected end of JSON input');
+        }
+      })
+    );
+
+    await expect(apiRequest('/practice-sessions', { skipAuth: true })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 429,
+      code: 'HTTP_429',
+      retryAfterMs: 12_000
+    });
+  });
+
+  it('preserves a retriable 5xx when an upstream returns HTML', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: new Headers(),
+        json: async () => {
+          throw new SyntaxError('Unexpected token < in JSON');
+        }
+      })
+    );
+
+    await expect(apiRequest('/practice-sessions', { skipAuth: true })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 503,
+      code: 'HTTP_503',
+      message: '请求失败，请稍后再试。'
+    });
+  });
+
+  it('uses a status-specific terminal code for other malformed HTTP errors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 418,
+        headers: new Headers(),
+        json: async () => {
+          throw new SyntaxError('Unexpected token < in JSON');
+        }
+      })
+    );
+
+    await expect(apiRequest('/practice-sessions', { skipAuth: true })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 418,
+      code: 'HTTP_418'
+    });
+  });
+
   it('refreshes an expired access token and retries the authenticated request once', async () => {
     useAuthStore.setState({
       accessToken: 'expired-access',

@@ -12,6 +12,7 @@ import {
 import { fetchStatsSummary } from '../api/stats';
 import {
   classifySessionSubmissionError,
+  transitionAfterAcceptedCacheFailure,
   transitionAfterFailure,
   type LocalSessionLedgerEntry
 } from '../domain/sessionLedger';
@@ -70,8 +71,12 @@ export function createSessionOutbox(
     try {
       await deps.cacheAndRefreshAccepted(accepted);
     } catch {
-      // The accepted server row is safe to submit idempotently again. Keep the
-      // ledger row unchanged until server-backed caches have refreshed.
+      // The POST was accepted, so this is a cache synchronization failure, not
+      // a submission classification. Back off before an idempotent replay.
+      await deps.updateEntry(clientSessionId, (current) => {
+        if (!('attemptCount' in current)) return current;
+        return transitionAfterAcceptedCacheFailure(current, deps.now());
+      });
       return;
     }
 
@@ -163,6 +168,16 @@ export function createAuthenticatedSessionOutbox(options: {
       options.preferencesStore.getState().removeLedgerEntry(clientSessionId),
     post: createPracticeSession,
     async cacheAndRefreshAccepted(accepted) {
+      await Promise.all([
+        options.queryClient.cancelQueries({
+          queryKey: sessionsKey,
+          exact: true
+        }),
+        options.queryClient.cancelQueries({
+          queryKey: statsKey,
+          exact: true
+        })
+      ]);
       options.queryClient.setQueryData<PracticeSession[]>(
         sessionsKey,
         (current = []) => [

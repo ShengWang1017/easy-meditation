@@ -189,9 +189,17 @@ export function createUserPreferencesStore(
 ): UserPreferencesStore {
   const defaults = cloneDefaultPreferences();
   const barrier = createAwaitableStateStorage(storage);
-  let dismissTail: Promise<void> = Promise.resolve();
+  let persistedMutationTail: Promise<void> = Promise.resolve();
   let hydrationError: unknown;
   let syncHydratedCustomRhythm: ((rhythm: CustomRhythm) => void) | undefined;
+
+  function enqueuePersistedMutation(
+    operation: () => Promise<void>
+  ): Promise<void> {
+    const result = persistedMutationTail.then(operation);
+    persistedMutationTail = result.catch(() => undefined);
+    return result;
+  }
 
   const store = createStore<UserPreferencesState>()(
     persist<UserPreferencesState, [], [], PersistedPreferences>(
@@ -210,6 +218,28 @@ export function createUserPreferencesStore(
           retryMutation = null;
           lastCustomRhythmFailure = undefined;
         };
+
+        async function persistLedgerMutation(
+          update: (
+            current: LocalSessionLedgerEntry[]
+          ) => LocalSessionLedgerEntry[]
+        ): Promise<void> {
+          const previousLedger = get().localSessionLedger;
+          const nextLedger = update(previousLedger);
+          set({ localSessionLedger: nextLedger });
+          try {
+            await barrier.flush();
+          } catch (error) {
+            set({ localSessionLedger: previousLedger });
+            try {
+              await barrier.flush();
+            } catch {
+              // The failed optimistic ledger value was never committed. Keep
+              // the in-memory rollback even if storage remains unavailable.
+            }
+            throw error;
+          }
+        }
 
         function enqueueCustomRhythmMutation(
           mutation: CustomRhythmMutation
@@ -247,9 +277,7 @@ export function createUserPreferencesStore(
               throw writeError;
             }
           };
-          const commit = customRhythmTail
-            ? customRhythmTail.then(runCommit)
-            : runCommit();
+          const commit = enqueuePersistedMutation(runCommit);
           const settledCommit = commit.catch(() => undefined);
           customRhythmTail = settledCommit;
           void settledCommit.then(() => {
@@ -310,20 +338,24 @@ export function createUserPreferencesStore(
           },
           async setDurationOverride(methodId, durationMinutes) {
             const validMethodId = builtInMethodIdSchema.parse(methodId);
-            const validOverrides = durationOverridesSchema.parse({
-              ...get().durationOverrides,
-              [validMethodId]: durationMinutes
+            await enqueuePersistedMutation(async () => {
+              const validOverrides = durationOverridesSchema.parse({
+                ...get().durationOverrides,
+                [validMethodId]: durationMinutes
+              });
+              set({ durationOverrides: validOverrides });
+              await barrier.flush();
             });
-            set({ durationOverrides: validOverrides });
-            await barrier.flush();
           },
           async setSoundEnabled(enabled) {
             const validEnabled = soundEnabledSchema.parse(enabled);
-            set({ soundEnabled: validEnabled });
-            await barrier.flush();
+            await enqueuePersistedMutation(async () => {
+              set({ soundEnabled: validEnabled });
+              await barrier.flush();
+            });
           },
           dismissBeforeStart() {
-            const dismissal = dismissTail.then(async () => {
+            return enqueuePersistedMutation(async () => {
               const previousDismissed = get().beforeStartDismissed;
               set({ beforeStartDismissed: true });
               try {
@@ -338,68 +370,65 @@ export function createUserPreferencesStore(
                 throw error;
               }
             });
-            dismissTail = dismissal.catch(() => undefined);
-            return dismissal;
           },
           async putLedgerEntry(entry) {
             const validEntry = cloneLedgerEntry(
               localSessionLedgerEntrySchema.parse(entry)
             );
-            set((state) => {
-              const existingIndex = state.localSessionLedger.findIndex(
-                (candidate) =>
-                  candidate.clientSessionId === validEntry.clientSessionId
-              );
-              if (existingIndex === -1) {
-                return {
-                  localSessionLedger: [...state.localSessionLedger, validEntry]
-                };
-              }
+            await enqueuePersistedMutation(() =>
+              persistLedgerMutation((currentLedger) => {
+                const existingIndex = currentLedger.findIndex(
+                  (candidate) =>
+                    candidate.clientSessionId === validEntry.clientSessionId
+                );
+                if (existingIndex === -1) {
+                  return [...currentLedger, validEntry];
+                }
 
-              const localSessionLedger = [...state.localSessionLedger];
-              localSessionLedger[existingIndex] = validEntry;
-              return { localSessionLedger };
-            });
-            await barrier.flush();
+                const nextLedger = [...currentLedger];
+                nextLedger[existingIndex] = validEntry;
+                return nextLedger;
+              })
+            );
           },
           async updateLedgerEntry(clientSessionId, updater) {
-            const validClientSessionId = clientSessionIdSchema.parse(
-              clientSessionId
-            );
-            const current = get().localSessionLedger.find(
-              (entry) => entry.clientSessionId === validClientSessionId
-            );
-            if (!current) {
-              throw new Error(`Ledger entry not found: ${validClientSessionId}`);
-            }
+            const validClientSessionId = clientSessionIdSchema.parse(clientSessionId);
+            await enqueuePersistedMutation(() =>
+              persistLedgerMutation((currentLedger) => {
+                const current = currentLedger.find(
+                  (entry) => entry.clientSessionId === validClientSessionId
+                );
+                if (!current) {
+                  throw new Error(
+                    `Ledger entry not found: ${validClientSessionId}`
+                  );
+                }
 
-            const updated = localSessionLedgerEntrySchema.parse(
-              updater(cloneLedgerEntry(current))
-            );
-            if (updated.clientSessionId !== validClientSessionId) {
-              throw new Error('A ledger update cannot change clientSessionId.');
-            }
+                const updated = localSessionLedgerEntrySchema.parse(
+                  updater(cloneLedgerEntry(current))
+                );
+                if (updated.clientSessionId !== validClientSessionId) {
+                  throw new Error('A ledger update cannot change clientSessionId.');
+                }
 
-            const clonedUpdate = cloneLedgerEntry(updated);
-            set((state) => ({
-              localSessionLedger: state.localSessionLedger.map((entry) =>
-                entry.clientSessionId === validClientSessionId
-                  ? clonedUpdate
-                  : entry
-              )
-            }));
-            await barrier.flush();
+                const clonedUpdate = cloneLedgerEntry(updated);
+                return currentLedger.map((entry) =>
+                  entry.clientSessionId === validClientSessionId
+                    ? clonedUpdate
+                    : entry
+                );
+              })
+            );
           },
           async removeLedgerEntry(clientSessionId) {
-            const validClientSessionId = clientSessionIdSchema.parse(
-              clientSessionId
-            );
-            set((state) => ({
-              localSessionLedger: state.localSessionLedger.filter(
-                (entry) => entry.clientSessionId !== validClientSessionId
+            const validClientSessionId = clientSessionIdSchema.parse(clientSessionId);
+            await enqueuePersistedMutation(() =>
+              persistLedgerMutation((currentLedger) =>
+                currentLedger.filter(
+                  (entry) => entry.clientSessionId !== validClientSessionId
+                )
               )
-            }));
-            await barrier.flush();
+            );
           }
         };
       },

@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { StateStorage } from 'zustand/middleware';
 import type {
   BreathingPhase,
   PracticeSession,
@@ -44,7 +45,13 @@ vi.mock('../api/client', () => ({
 import { ApiRequestError } from '../api/client';
 import type { LocalSessionLedgerEntry } from '../domain/sessionLedger';
 import { userQueryKeys } from '../query/keys';
-import type { UserPreferencesStore } from '../store/preferencesStore';
+import {
+  DEFAULT_PREFERENCES,
+  createUserPreferencesStore,
+  hydrateUserPreferencesStore,
+  preferencesStorageKey,
+  type UserPreferencesStore
+} from '../store/preferencesStore';
 import {
   createAuthenticatedSessionOutbox,
   createSessionOutbox
@@ -94,6 +101,16 @@ function pendingEntry(
   };
 }
 
+function retryPausedEntry(): RetryableLedgerEntry {
+  return {
+    ...pendingEntry(),
+    state: 'retry-paused',
+    attemptCount: 5,
+    nextAttemptAt: null,
+    lastErrorCode: 'NETWORK_ERROR'
+  };
+}
+
 function customEntry(): Extract<LocalSessionLedgerEntry, { origin: 'custom' }> {
   return {
     ...practiceInput('22222222-2222-4222-8222-222222222222'),
@@ -124,6 +141,71 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function createFailNextLedgerStorage(
+  userId: string,
+  initialLedger: LocalSessionLedgerEntry[]
+) {
+  let stored = JSON.stringify({
+    state: {
+      customRhythm: { ...DEFAULT_PREFERENCES.customRhythm },
+      durationOverrides: {},
+      soundEnabled: true,
+      beforeStartDismissed: false,
+      localSessionLedger: initialLedger
+    },
+    version: 0
+  });
+  let failNext = false;
+  const storage: StateStorage = {
+    async getItem(name) {
+      return name === preferencesStorageKey(userId) ? stored : null;
+    },
+    async setItem(_name, value) {
+      if (failNext) {
+        failNext = false;
+        throw new Error('disk unavailable');
+      }
+      stored = value;
+    },
+    async removeItem() {
+      stored = '';
+    }
+  };
+
+  return {
+    storage,
+    failNextWrite() {
+      failNext = true;
+    },
+    readLedger() {
+      return (JSON.parse(stored) as {
+        state: { localSessionLedger: LocalSessionLedgerEntry[] };
+      }).state.localSessionLedger;
+    }
+  };
+}
+
+function createStoreBackedOutbox(
+  store: UserPreferencesStore,
+  options: {
+    post(input: PracticeSessionCreateInput): Promise<PracticeSession>;
+    cacheAndRefreshAccepted?: (session: PracticeSession) => Promise<void>;
+  }
+) {
+  return createSessionOutbox({
+    getLedger: () => store.getState().localSessionLedger,
+    updateEntry: (clientSessionId, updater) =>
+      store.getState().updateLedgerEntry(clientSessionId, updater),
+    removeEntry: (clientSessionId) =>
+      store.getState().removeLedgerEntry(clientSessionId),
+    post: options.post,
+    cacheAndRefreshAccepted:
+      options.cacheAndRefreshAccepted ?? (async () => undefined),
+    onTerminalUnauthorized: async () => undefined,
+    now: () => NOW_MS
+  });
 }
 
 function createHarness(
@@ -251,7 +333,7 @@ describe('session outbox execution', () => {
     expect(harness.ledger).toEqual([]);
   });
 
-  it('retains an unchanged pending row when cache or refetch fails after POST success', async () => {
+  it('backs off a cache refresh failure without immediately reposting the accepted session', async () => {
     const entry = pendingEntry();
     const harness = createHarness([entry], {
       cacheAndRefreshAccepted: async () => {
@@ -263,9 +345,17 @@ describe('session outbox execution', () => {
       harness.outbox.submit(entry.clientSessionId)
     ).resolves.toBeUndefined();
 
-    expect(harness.ledger).toEqual([entry]);
-    expect(harness.updateEntry).not.toHaveBeenCalled();
+    expect(harness.ledger[0]).toMatchObject({
+      state: 'pending',
+      attemptCount: 1,
+      nextAttemptAt: new Date(NOW_MS + 5_000).toISOString(),
+      lastErrorCode: 'CACHE_REFRESH_FAILED'
+    });
+    expect(harness.updateEntry).toHaveBeenCalledTimes(1);
     expect(harness.removeEntry).not.toHaveBeenCalled();
+
+    await harness.outbox.drainDue();
+    expect(harness.post).toHaveBeenCalledTimes(1);
   });
 
   it('auth-blocks a final 401 and resumes that null-due row only on authenticated drain', async () => {
@@ -340,6 +430,65 @@ describe('session outbox execution', () => {
     expect(harness.events).toEqual(['update', 'post', 'cache', 'remove']);
     expect(harness.ledger).toEqual([]);
   });
+
+  it('rolls back a failed persisted failure transition', async () => {
+    const entry = pendingEntry();
+    const userId = 'failure-transition-user';
+    const persistence = createFailNextLedgerStorage(userId, [entry]);
+    const store = createUserPreferencesStore(userId, persistence.storage);
+    await hydrateUserPreferencesStore(store);
+    persistence.failNextWrite();
+    const outbox = createStoreBackedOutbox(store, {
+      post: async () => {
+        throw new TypeError('offline');
+      }
+    });
+
+    await expect(outbox.submit(entry.clientSessionId)).rejects.toThrow(
+      'disk unavailable'
+    );
+
+    expect(store.getState().localSessionLedger).toEqual([entry]);
+    expect(persistence.readLedger()).toEqual([entry]);
+  });
+
+  it('does not POST when a manual-retry state reset fails to persist', async () => {
+    const entry = retryPausedEntry();
+    const userId = 'manual-retry-user';
+    const persistence = createFailNextLedgerStorage(userId, [entry]);
+    const store = createUserPreferencesStore(userId, persistence.storage);
+    await hydrateUserPreferencesStore(store);
+    persistence.failNextWrite();
+    const post = vi.fn(async () => acceptedSession());
+    const outbox = createStoreBackedOutbox(store, { post });
+
+    await expect(outbox.retryNow(entry.clientSessionId)).rejects.toThrow(
+      'disk unavailable'
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(store.getState().localSessionLedger).toEqual([entry]);
+    expect(persistence.readLedger()).toEqual([entry]);
+  });
+
+  it('restores an accepted row when its persisted removal fails', async () => {
+    const entry = pendingEntry();
+    const userId = 'accepted-removal-user';
+    const persistence = createFailNextLedgerStorage(userId, [entry]);
+    const store = createUserPreferencesStore(userId, persistence.storage);
+    await hydrateUserPreferencesStore(store);
+    persistence.failNextWrite();
+    const outbox = createStoreBackedOutbox(store, {
+      post: async () => acceptedSession()
+    });
+
+    await expect(outbox.submit(entry.clientSessionId)).rejects.toThrow(
+      'disk unavailable'
+    );
+
+    expect(store.getState().localSessionLedger).toEqual([entry]);
+    expect(persistence.readLedger()).toEqual([entry]);
+  });
 });
 
 describe('authenticated session outbox adapter', () => {
@@ -412,11 +561,130 @@ describe('authenticated session outbox adapter', () => {
     expect(ledger).toEqual([]);
   });
 
-  it('does not classify a refresh failure as a submission failure', async () => {
+  it('waits for post-acceptance fetches instead of reusing stale in-flight user queries', async () => {
+    const entry = pendingEntry();
+    const accepted = acceptedSession();
+    const staleSession: PracticeSession = {
+      ...accepted,
+      id: '66666666-6666-4666-8666-666666666666',
+      clientSessionId: '77777777-7777-4777-8777-777777777777'
+    };
+    let ledger: LocalSessionLedgerEntry[] = [entry];
+    const removeLedgerEntry = vi.fn(async (clientSessionId: string) => {
+      ledger = ledger.filter((row) => row.clientSessionId !== clientSessionId);
+    });
+    const store = {
+      getState: () => ({
+        localSessionLedger: ledger,
+        updateLedgerEntry: vi.fn(),
+        removeLedgerEntry
+      })
+    } as unknown as UserPreferencesStore;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    const sessionsKey = userQueryKeys.sessions('user-a');
+    const statsKey = userQueryKeys.stats('user-a');
+    const staleSessionsGate = deferred<PracticeSession[]>();
+    const staleStatsGate = deferred<StatsSummary>();
+    const freshSessionsGate = deferred<PracticeSession[]>();
+    const freshStatsGate = deferred<StatsSummary>();
+    const staleSessionsRequest = queryClient
+      .fetchQuery({
+        queryKey: sessionsKey,
+        queryFn: () => staleSessionsGate.promise
+      })
+      .catch(() => undefined);
+    const staleStatsRequest = queryClient
+      .fetchQuery({
+        queryKey: statsKey,
+        queryFn: () => staleStatsGate.promise
+      })
+      .catch(() => undefined);
+    apiMocks.createPracticeSession.mockResolvedValue(accepted);
+    apiMocks.fetchPracticeSessions.mockReturnValue(freshSessionsGate.promise);
+    apiMocks.fetchStatsSummary.mockReturnValue(freshStatsGate.promise);
+    const outbox = createAuthenticatedSessionOutbox({
+      userId: 'user-a',
+      preferencesStore: store,
+      queryClient,
+      onTerminalUnauthorized: async () => undefined,
+      now: () => NOW_MS
+    });
+
+    const submission = outbox.submit(entry.clientSessionId);
+    try {
+      await vi.waitFor(() => {
+        expect(apiMocks.fetchPracticeSessions).toHaveBeenCalledTimes(1);
+        expect(apiMocks.fetchStatsSummary).toHaveBeenCalledTimes(1);
+      });
+      expect(queryClient.getQueryData(sessionsKey)).toEqual([accepted]);
+      expect(removeLedgerEntry).not.toHaveBeenCalled();
+      expect(ledger).toEqual([entry]);
+
+      staleSessionsGate.resolve([staleSession]);
+      staleStatsGate.resolve({
+        totalSessions: 0,
+        totalPracticeSeconds: 0,
+        weeklyPracticeSeconds: 0,
+        currentStreak: 0,
+        recentSessions: []
+      });
+      await Promise.resolve();
+      expect(removeLedgerEntry).not.toHaveBeenCalled();
+
+      freshSessionsGate.resolve([accepted]);
+      freshStatsGate.resolve({
+        totalSessions: 1,
+        totalPracticeSeconds: 298,
+        weeklyPracticeSeconds: 298,
+        currentStreak: 1,
+        recentSessions: [accepted]
+      });
+      await submission;
+
+      expect(queryClient.getQueryData(sessionsKey)).toEqual([accepted]);
+      expect(removeLedgerEntry).toHaveBeenCalledWith(entry.clientSessionId);
+      expect(ledger).toEqual([]);
+    } finally {
+      staleSessionsGate.resolve([staleSession]);
+      staleStatsGate.resolve({
+        totalSessions: 0,
+        totalPracticeSeconds: 0,
+        weeklyPracticeSeconds: 0,
+        currentStreak: 0,
+        recentSessions: []
+      });
+      freshSessionsGate.resolve([accepted]);
+      freshStatsGate.resolve({
+        totalSessions: 1,
+        totalPracticeSeconds: 298,
+        weeklyPracticeSeconds: 298,
+        currentStreak: 1,
+        recentSessions: [accepted]
+      });
+      await Promise.allSettled([
+        staleSessionsRequest,
+        staleStatsRequest,
+        submission
+      ]);
+    }
+  });
+
+  it('schedules a refresh failure without classifying the accepted POST as terminal', async () => {
     const entry = pendingEntry();
     const accepted = acceptedSession();
     let ledger: LocalSessionLedgerEntry[] = [entry];
-    const updateLedgerEntry = vi.fn();
+    const updateLedgerEntry = vi.fn(
+      async (
+        clientSessionId: string,
+        updater: (entry: LocalSessionLedgerEntry) => LocalSessionLedgerEntry
+      ) => {
+        ledger = ledger.map((row) =>
+          row.clientSessionId === clientSessionId ? updater(row) : row
+        );
+      }
+    );
     const removeLedgerEntry = vi.fn(async (clientSessionId: string) => {
       ledger = ledger.filter((row) => row.clientSessionId !== clientSessionId);
     });
@@ -449,8 +717,13 @@ describe('authenticated session outbox adapter', () => {
 
     await expect(outbox.submit(entry.clientSessionId)).resolves.toBeUndefined();
 
-    expect(ledger).toEqual([entry]);
-    expect(updateLedgerEntry).not.toHaveBeenCalled();
+    expect(ledger[0]).toMatchObject({
+      state: 'pending',
+      attemptCount: 1,
+      nextAttemptAt: new Date(NOW_MS + 5_000).toISOString(),
+      lastErrorCode: 'CACHE_REFRESH_FAILED'
+    });
+    expect(updateLedgerEntry).toHaveBeenCalledTimes(1);
     expect(removeLedgerEntry).not.toHaveBeenCalled();
   });
 });

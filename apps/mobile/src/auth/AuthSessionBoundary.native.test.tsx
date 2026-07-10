@@ -265,7 +265,7 @@ describe('AuthSessionBoundary', () => {
     });
   });
 
-  it('drains auth-blocked and due ledger rows after hydration before exposing children', async () => {
+  it('starts the authenticated drain after hydration without blocking protected children', async () => {
     getMeMock.mockResolvedValue(USER_A);
     const drain = deferred<void>();
     mockSessionOutbox.drainDue.mockReturnValue(drain.promise);
@@ -290,10 +290,23 @@ describe('AuthSessionBoundary', () => {
         resumeAuthBlocked: true
       });
     });
-    expect(view.queryByTestId('session-user')).toBeNull();
+    await waitFor(() => expect(view.getByTestId('session-user')).toBeTruthy());
 
     await act(async () => drain.resolve());
+  });
+
+  it('handles a background drain rejection without hiding children or leaking a rejection', async () => {
+    getMeMock.mockResolvedValue(USER_A);
+    mockSessionOutbox.drainDue.mockRejectedValue(new Error('storage unavailable'));
+    const view = renderWithProviders(
+      <AuthSessionBoundary>
+        <SessionProbe />
+      </AuthSessionBoundary>,
+      { queryClient: createTestQueryClient() }
+    );
+
     await waitFor(() => expect(view.getByTestId('session-user')).toBeTruthy());
+    expect(view.queryByText('账户准备失败')).toBeNull();
   });
 
   it('keeps one session-scoped outbox instance across access-token rotation', async () => {
