@@ -304,6 +304,27 @@ describe('useFocusSession', () => {
     expect(view.audio.play).toHaveBeenCalledWith('complete');
   });
 
+  it('persists a natural completion when pause and end beat the refresh interval', async () => {
+    const view = harness();
+    act(() => latest.start());
+    nowMs += 2_000;
+
+    act(() => latest.pause());
+    expect(latest.snapshot).toMatchObject({
+      status: 'completed',
+      elapsedSeconds: 2
+    });
+
+    await act(async () => latest.persistIntentionalEnd());
+
+    expect(view.putLedgerEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        completed: true,
+        actualDurationSeconds: 2
+      })
+    );
+  });
+
   it('replays once with fresh identity, clock, timestamp, and cue state', async () => {
     const view = harness({ method: resolvedMethod({ plannedDurationSeconds: 1 }) });
     act(() => latest.start());

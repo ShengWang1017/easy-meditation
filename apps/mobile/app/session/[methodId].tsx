@@ -19,7 +19,7 @@ import { PrototypeScreen } from '../../src/components/PrototypeScreen';
 import { SessionExitDialog } from '../../src/components/SessionExitDialog';
 import { toCustomBreathingMethod } from '../../src/domain/customRhythm';
 import {
-  getMethodDisplayTitle,
+  buildMethodPresentationSlots,
   type BuiltInMethodId
 } from '../../src/domain/methodPresentation';
 import type { LocalSessionLedgerEntry } from '../../src/domain/sessionLedger';
@@ -50,6 +50,11 @@ export default function SessionScreen() {
   const routeMethodId = Array.isArray(params.methodId)
     ? params.methodId[0]
     : params.methodId;
+  const builtInMethodId =
+    routeMethodId && BUILT_IN_IDS.has(routeMethodId as BuiltInMethodId)
+      ? (routeMethodId as BuiltInMethodId)
+      : null;
+  const isCustomMethod = routeMethodId === 'custom';
   const customRhythm = usePreferencesStore((state) => state.customRhythm);
   const durationOverrides = usePreferencesStore(
     (state) => state.durationOverrides
@@ -57,10 +62,10 @@ export default function SessionScreen() {
   const methodsQuery = useQuery({
     queryKey: publicQueryKeys.methods,
     queryFn: fetchBreathingMethods,
-    enabled: routeMethodId !== 'custom'
+    enabled: builtInMethodId !== null
   });
   const bundle = useMemo<SessionMethodBundle | null>(() => {
-    if (routeMethodId === 'custom') {
+    if (isCustomMethod) {
       const clockMethod = toCustomBreathingMethod(customRhythm);
       return {
         clockMethod,
@@ -75,31 +80,39 @@ export default function SessionScreen() {
       };
     }
 
-    if (!routeMethodId || !BUILT_IN_IDS.has(routeMethodId as BuiltInMethodId)) {
+    if (builtInMethodId === null) {
       return null;
     }
-    const id = routeMethodId as BuiltInMethodId;
-    const clockMethod = methodsQuery.data?.find((method) => method.id === id);
+    const presentation = buildMethodPresentationSlots(
+      methodsQuery.data ?? [],
+      customRhythm
+    ).find((candidate) => candidate.id === builtInMethodId);
+    const clockMethod = presentation?.method;
     if (!clockMethod) return null;
     const durationMinutes =
-      durationOverrides[id] ?? clockMethod.defaultDurationSeconds / 60;
+      durationOverrides[builtInMethodId] ??
+      clockMethod.defaultDurationSeconds / 60;
     return {
       clockMethod,
       resolved: {
-        id,
-        title: getMethodDisplayTitle(id) ?? clockMethod.title,
+        id: builtInMethodId,
+        title: presentation.title,
         phases: clockMethod.phases,
         plannedDurationSeconds: durationMinutes * 60,
         origin: 'built_in'
       },
-      rhythmLabel: clockMethod.phases
-        .map((phase) => phase.durationSeconds)
-        .join('-')
+      rhythmLabel: presentation.rhythmLabel
     };
-  }, [customRhythm, durationOverrides, methodsQuery.data, routeMethodId]);
+  }, [
+    builtInMethodId,
+    customRhythm,
+    durationOverrides,
+    isCustomMethod,
+    methodsQuery.data
+  ]);
 
   if (
-    routeMethodId !== 'custom' &&
+    builtInMethodId !== null &&
     methodsQuery.isPending &&
     !methodsQuery.data
   ) {
@@ -111,7 +124,7 @@ export default function SessionScreen() {
   }
 
   if (!bundle) {
-    const loadFailure = routeMethodId !== 'custom' && methodsQuery.isError;
+    const loadFailure = builtInMethodId !== null && methodsQuery.isError;
     return (
       <FocusState>
         <InlineState
@@ -286,6 +299,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
           {isReady ? (
             <PrototypeButton
               label="开始"
+              labelStyle={styles.startLabel}
               onPress={controller.start}
               style={styles.startButton}
               variant="quiet"
@@ -302,6 +316,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
                       : '继续'
                 }
                 loading={isCompleted && controller.isPersisting}
+                labelStyle={styles.primaryActionLabel}
                 onPress={
                   isCompleted
                     ? () => void controller.replay()
@@ -315,6 +330,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
               <PrototypeButton
                 disabled={isCompleted && !controller.controlsUnlocked}
                 label="结束训练"
+                labelStyle={styles.endActionLabel}
                 onPress={() => void exitGuard.requestExplicitEnd().catch(() => undefined)}
                 style={styles.endAction}
                 variant="quiet"
@@ -446,6 +462,12 @@ const styles = StyleSheet.create({
     minHeight: 58,
     width: 260
   },
+  startLabel: {
+    color: colors.ink,
+    fontSize: 22,
+    fontWeight: '500',
+    lineHeight: 28
+  },
   primaryAction: {
     alignSelf: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.46)',
@@ -455,11 +477,23 @@ const styles = StyleSheet.create({
     minHeight: layout.touchTarget,
     paddingHorizontal: 22
   },
+  primaryActionLabel: {
+    color: 'rgba(34, 39, 47, 0.62)',
+    fontSize: 18,
+    fontWeight: '500',
+    lineHeight: 22
+  },
   endAction: {
     backgroundColor: 'rgba(222, 222, 237, 0.76)',
     borderColor: 'rgba(255, 255, 255, 0.42)',
     borderRadius: 36,
     borderWidth: 1,
     minHeight: 58
+  },
+  endActionLabel: {
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: '500',
+    lineHeight: 30
   }
 });

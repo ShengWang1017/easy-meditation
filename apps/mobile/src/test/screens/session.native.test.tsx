@@ -2,6 +2,7 @@ import React from 'react';
 import { jest } from '@jest/globals';
 import type { BreathingMethod } from '@easy-meditation/shared';
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import type { StateStorage } from 'zustand/middleware';
 
 let mockMethodId = 'box';
@@ -136,6 +137,7 @@ import {
   hydrateUserPreferencesStore,
   type UserPreferencesStore
 } from '../../store/preferencesStore';
+import { colors } from '../../theme/tokens';
 import { createTestQueryClient, renderWithProviders } from '../renderWithProviders';
 
 const fetchMethodsMock = fetchBreathingMethods as jest.MockedFunction<
@@ -156,6 +158,21 @@ const boxMethod: BreathingMethod = {
     { kind: 'hold', label: '屏息', durationSeconds: 4 }
   ],
   sortOrder: 10,
+  isActive: true
+};
+
+const coherentMethod: BreathingMethod = {
+  id: 'coherent',
+  slug: 'coherent',
+  title: 'API 共振呼吸',
+  subtitle: '吸气 · 呼气',
+  category: 'classic',
+  defaultDurationSeconds: 300,
+  phases: [
+    { kind: 'inhale', label: '吸气', durationSeconds: 5 },
+    { kind: 'exhale', label: '呼气', durationSeconds: 5 }
+  ],
+  sortOrder: 30,
   isActive: true
 };
 
@@ -293,6 +310,73 @@ describe('SessionScreen', () => {
     });
   });
 
+  it('uses the approved coherent presentation rhythm instead of joining API phases', async () => {
+    const view = await renderSession({
+      methodId: 'coherent',
+      methods: [coherentMethod]
+    });
+
+    await waitFor(() => expect(view.getByText('5-0-5')).toBeTruthy());
+    expect(view.queryByText('5-5')).toBeNull();
+    expect(view.getByText('等量呼吸法')).toBeTruthy();
+  });
+
+  it('matches focus action typography while retaining minimum touch targets', async () => {
+    const ready = await renderSession();
+    await waitFor(() => expect(ready.getByText('开始')).toBeTruthy());
+    expect(StyleSheet.flatten(ready.getByText('开始').props.style)).toMatchObject({
+      color: colors.ink,
+      fontSize: 22,
+      fontWeight: '500'
+    });
+    expect(
+      StyleSheet.flatten(ready.getByRole('button', { name: '开始' }).props.style)
+        .minHeight
+    ).toBeGreaterThanOrEqual(44);
+    ready.unmount();
+
+    mockController.snapshot = sessionSnapshot('running');
+    const running = await renderSession();
+    await waitFor(() => expect(running.getByText('暂停')).toBeTruthy());
+    expect(StyleSheet.flatten(running.getByText('暂停').props.style)).toMatchObject({
+      color: 'rgba(34, 39, 47, 0.62)',
+      fontSize: 18,
+      fontWeight: '500'
+    });
+    expect(StyleSheet.flatten(running.getByText('结束训练').props.style)).toMatchObject({
+      color: colors.ink,
+      fontSize: 24,
+      fontWeight: '500'
+    });
+    expect(
+      StyleSheet.flatten(
+        running.getByRole('button', { name: '结束训练' }).props.style
+      ).minHeight
+    ).toBeGreaterThanOrEqual(44);
+    running.unmount();
+
+    mockController.snapshot = sessionSnapshot('paused');
+    const paused = await renderSession();
+    await waitFor(() => expect(paused.getByText('继续')).toBeTruthy());
+    expect(StyleSheet.flatten(paused.getByText('继续').props.style)).toMatchObject({
+      color: 'rgba(34, 39, 47, 0.62)',
+      fontSize: 18,
+      fontWeight: '500'
+    });
+    paused.unmount();
+
+    mockController.snapshot = sessionSnapshot('completed');
+    const completed = await renderSession();
+    await waitFor(() => expect(completed.getByText('再来一次')).toBeTruthy());
+    expect(
+      StyleSheet.flatten(completed.getByText('再来一次').props.style)
+    ).toMatchObject({
+      color: 'rgba(34, 39, 47, 0.62)',
+      fontSize: 18,
+      fontWeight: '500'
+    });
+  });
+
   it('renders running, paused, and completed controls without resetting composition', async () => {
     const ready = await renderSession();
     await waitFor(() => expect(ready.getByText('准备')).toBeTruthy());
@@ -368,7 +452,8 @@ describe('SessionScreen', () => {
   it('shows a direct return-to-practice state for an unknown method', async () => {
     const view = await renderSession({ methodId: 'missing', methods: [] });
 
-    await waitFor(() => expect(view.getByText('没有找到这项练习')).toBeTruthy());
+    expect(view.getByText('没有找到这项练习')).toBeTruthy();
+    expect(fetchMethodsMock).not.toHaveBeenCalled();
     fireEvent.press(view.getByRole('button', { name: '返回练习页' }));
     expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/practice');
   });

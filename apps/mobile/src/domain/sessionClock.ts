@@ -68,6 +68,9 @@ export function createSessionClock(
         return;
       }
 
+      if (snapshot().status === 'completed') {
+        return;
+      }
       elapsedBeforeRunMs = Math.min(durationMs, getElapsedMilliseconds());
       status = 'paused';
     },

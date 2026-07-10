@@ -150,4 +150,21 @@ describe('mobile session clock', () => {
     time = 90_000;
     expect(clock.snapshot()).toMatchObject({ status: 'completed', elapsedSeconds: 3 });
   });
+
+  test('keeps natural completion when pause wins the race with the refresh interval', () => {
+    let time = 0;
+    const clock = createSessionClock(getSeedMethod(0), 2, () => time);
+
+    clock.start();
+    time = 2_000;
+    clock.pause();
+
+    expect(clock.snapshot()).toMatchObject({
+      status: 'completed',
+      elapsedSeconds: 2,
+      remainingSeconds: 0,
+      phase: { isComplete: true }
+    });
+    expect(clock.freeze()).toMatchObject({ status: 'completed' });
+  });
 });

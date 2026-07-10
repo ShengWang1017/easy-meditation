@@ -4,6 +4,7 @@ import {
   StyleSheet,
   type PressableProps,
   type StyleProp,
+  type TextStyle,
   type ViewStyle
 } from 'react-native';
 
@@ -14,10 +15,12 @@ export type PrototypeButtonProps = Omit<PressableProps, 'children'> & {
   label: string;
   variant?: 'primary' | 'quiet';
   loading?: boolean;
+  labelStyle?: StyleProp<TextStyle>;
 };
 
 export function PrototypeButton({
   label,
+  labelStyle,
   variant = 'primary',
   loading = false,
   disabled = false,
@@ -58,7 +61,11 @@ export function PrototypeButton({
           size="small"
         />
       ) : null}
-      <AppText tone={variant === 'primary' ? 'inverse' : 'teal'} variant="label">
+      <AppText
+        style={labelStyle}
+        tone={variant === 'primary' ? 'inverse' : 'teal'}
+        variant="label"
+      >
         {label}
       </AppText>
     </Pressable>
