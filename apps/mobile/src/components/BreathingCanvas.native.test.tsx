@@ -1,11 +1,16 @@
 import type { BreathingPhase } from '@easy-meditation/shared';
+import { jest } from '@jest/globals';
+import { Skia } from '@shopify/react-native-skia';
 import { render } from '@testing-library/react-native';
 import {
   BREATH_LAYER_ORDER,
   BREATH_RENDER_SPEC,
-  BREATH_TEST_IDS,
+  BreathGradient,
+  BreathLayer,
+  BreathParticle,
   BreathingCanvas,
   createOrganicBlobPath,
+  resolveBreathTransitionDirective,
   resolveBreathingCanvasFrame
 } from './BreathingCanvas';
 
@@ -16,9 +21,10 @@ const phases: BreathingPhase[] = [
   { kind: 'hold', label: '屏息', durationSeconds: 4 }
 ];
 
-type RenderedHostNode = {
+type RenderedNode = {
   type: unknown;
   props: Record<string, any>;
+  findAll(predicate: (node: RenderedNode) => boolean): RenderedNode[];
 };
 
 describe('BreathingCanvas renderer contract', () => {
@@ -266,7 +272,81 @@ describe('BreathingCanvas renderer contract', () => {
     expect(early).toMatchObject({ kind: 'complete', progress: 1 });
   });
 
-  it('binds layer order, gradients, and all particles to the rendered Skia tree', () => {
+  it('snaps an in-flight transition on pause and starts resumed frames settled', () => {
+    const running = {
+      kind: 'inhale' as const,
+      reducedMotion: false,
+      status: 'running' as const
+    };
+    const paused = { ...running, status: 'paused' as const };
+
+    expect(resolveBreathTransitionDirective(running, paused)).toBe('snap');
+    expect(resolveBreathTransitionDirective(paused, running)).toBe('none');
+    expect(
+      resolveBreathTransitionDirective(running, {
+        ...running,
+        kind: 'exhale'
+      })
+    ).toBe('animate');
+    expect(
+      resolveBreathTransitionDirective(paused, {
+        ...paused,
+        kind: 'hold-full'
+      })
+    ).toBe('snap');
+  });
+
+  it('reuses the four native Skia paths across renderer updates', () => {
+    const makePath = jest.spyOn(Skia.Path, 'Make');
+    try {
+      const canvas = render(
+        <BreathingCanvas
+          phases={phases}
+          phaseIndex={0}
+          phaseKind="inhale"
+          phaseProgress={0.25}
+          phaseDurationMs={4_000}
+          status="running"
+          reducedMotion={false}
+          fixtureVisualTimeMs={0}
+        />
+      );
+      const initialPathAllocations = makePath.mock.calls.length;
+
+      canvas.rerender(
+        <BreathingCanvas
+          phases={phases}
+          phaseIndex={0}
+          phaseKind="inhale"
+          phaseProgress={0.5}
+          phaseDurationMs={4_000}
+          status="running"
+          reducedMotion={false}
+          fixtureVisualTimeMs={16}
+        />
+      );
+
+      expect(initialPathAllocations).toBeGreaterThanOrEqual(4);
+      expect(makePath).toHaveBeenCalledTimes(initialPathAllocations);
+    } finally {
+      makePath.mockRestore();
+    }
+  });
+
+  it('uses Skia path-value hooks instead of allocating paths in derived worklets', () => {
+    const { readFileSync } = jest.requireActual<typeof import('node:fs')>('node:fs');
+    const source = readFileSync(
+      `${process.cwd()}/src/components/BreathingCanvas.tsx`,
+      'utf8'
+    );
+
+    expect(source).toContain('usePathValue');
+    expect(source).not.toMatch(
+      /useDerivedValue\(\(\) =>\s*createOrganicBlobPath/
+    );
+  });
+
+  it('binds layer order, gradients, and particles through typed JSX wrappers', () => {
     const canvas = render(
       <BreathingCanvas
         phases={phases}
@@ -279,54 +359,54 @@ describe('BreathingCanvas renderer contract', () => {
         fixtureVisualTimeMs={0}
       />
     );
-    const hostNodes = canvas.UNSAFE_root.findAll(
-      (node: RenderedHostNode) =>
-        typeof node.type === 'string' && typeof node.props.testID === 'string'
-    ) as RenderedHostNode[];
-    const layerIds = hostNodes
-      .map((node) => node.props.testID as string)
-      .filter((testID) => testID.startsWith('breath-layer-'));
+    const layers = canvas.UNSAFE_root.findAllByType(BreathLayer) as RenderedNode[];
+    expect(layers.map((layer) => layer.props.name)).toEqual(BREATH_LAYER_ORDER);
 
-    expect(layerIds).toEqual(BREATH_LAYER_ORDER.map((layer) => BREATH_TEST_IDS.layers[layer]));
-
-    const getHostNode = (testID: string) => {
-      const matches = hostNodes.filter((node) => node.props.testID === testID);
+    const gradients = canvas.UNSAFE_root.findAllByType(BreathGradient) as RenderedNode[];
+    const getGradient = (name: 'glow' | 'veil' | 'core') => {
+      const matches = gradients.filter((gradient) => gradient.props.name === name);
       expect(matches).toHaveLength(1);
       return matches[0]!;
     };
-    expect(getHostNode(BREATH_TEST_IDS.gradients.glow).props).toMatchObject({
+    expect(getGradient('glow').props).toMatchObject({
+      kind: 'two-point',
       colors: [...BREATH_RENDER_SPEC.glow.colors],
       positions: [...BREATH_RENDER_SPEC.glow.positions]
     });
-    expect(getHostNode(BREATH_TEST_IDS.gradients.veil).props).toMatchObject({
+    expect(getGradient('veil').props).toMatchObject({
+      kind: 'linear',
       colors: [...BREATH_RENDER_SPEC.veil.colors],
       positions: [...BREATH_RENDER_SPEC.veil.positions]
     });
-    expect(getHostNode(BREATH_TEST_IDS.gradients.core).props).toMatchObject({
+    expect(getGradient('core').props).toMatchObject({
+      kind: 'two-point',
       colors: [...BREATH_RENDER_SPEC.core.colors],
       positions: [...BREATH_RENDER_SPEC.core.positions]
     });
+    for (const gradient of gradients) {
+      const expectedHostType =
+        gradient.props.kind === 'linear'
+          ? 'skLinearGradient'
+          : gradient.props.kind === 'radial'
+            ? 'skRadialGradient'
+            : 'skTwoPointConicalGradient';
+      expect(
+        gradient.findAll((node) => node.type === expectedHostType)
+      ).toHaveLength(1);
+    }
 
-    const particles = hostNodes.filter(
-      (node) =>
-        node.type === 'skCircle' &&
-        (node.props.testID as string).startsWith(BREATH_TEST_IDS.particlePrefix)
-    );
+    const particles = canvas.UNSAFE_root.findAllByType(BreathParticle) as RenderedNode[];
     expect(particles).toHaveLength(42);
-    expect(particles.map((node) => node.props.testID)).toEqual(
-      Array.from(
-        { length: 42 },
-        (_, index) => `${BREATH_TEST_IDS.particlePrefix}${index}`
-      )
+    expect(particles.map((particle) => particle.props.index)).toEqual(
+      Array.from({ length: 42 }, (_, index) => index)
     );
 
-    const particleGradients = hostNodes.filter(
-      (node) =>
-        node.type === 'skRadialGradient' &&
-        (node.props.testID as string).startsWith(BREATH_TEST_IDS.particleGradientPrefix)
+    const particleGradients = gradients.filter(
+      (gradient) => gradient.props.name === 'particle'
     );
     expect(particleGradients).toHaveLength(42);
     for (const gradient of particleGradients) {
+      expect(gradient.props.kind).toBe('radial');
       expect(gradient.props.positions).toEqual([0, 1]);
       expect(gradient.props.colors[1]).toBe('rgba(255, 255, 255, 0)');
     }
@@ -334,6 +414,32 @@ describe('BreathingCanvas renderer contract', () => {
       'rgba(255, 255, 255, 0.027)',
       'rgba(255, 255, 255, 0)'
     ]);
+
+    const skiaHostsWithTestIDs = canvas.UNSAFE_root.findAll(
+      (node: RenderedNode) =>
+        typeof node.type === 'string' &&
+        node.type.startsWith('sk') &&
+        typeof node.props.testID === 'string'
+    );
+    expect(skiaHostsWithTestIDs).toHaveLength(0);
+  });
+
+  it('caches the compatibility CanvasKit initialization at module scope', () => {
+    const { readFileSync } = jest.requireActual<typeof import('node:fs')>('node:fs');
+    const source = readFileSync(
+      `${process.cwd()}/src/test/skiaJestEnv.cjs`,
+      'utf8'
+    );
+
+    expect(source).toContain(
+      "Mirrors @shopify/react-native-skia/jestEnv.mjs"
+    );
+    expect(source).toMatch(
+      /const canvasKitPromise = CanvasKitInit\(\{\}\);/
+    );
+    expect(source).toContain(
+      'this.global.CanvasKit = await canvasKitPromise;'
+    );
   });
 
   it('renders a decorative CanvasKit-backed native canvas', () => {

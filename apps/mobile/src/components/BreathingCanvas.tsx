@@ -10,13 +10,15 @@ import {
   Skia,
   TwoPointConicalGradient,
   useClock,
+  usePathValue,
   vec
 } from '@shopify/react-native-skia';
 import type { SkPath } from '@shopify/react-native-skia';
-import { useEffect, useMemo, useRef } from 'react';
-import type { ComponentProps, ComponentType } from 'react';
+import { useEffect, useRef } from 'react';
+import type { ComponentProps, PropsWithChildren } from 'react';
 import { useWindowDimensions } from 'react-native';
 import {
+  cancelAnimation,
   Easing,
   useDerivedValue,
   useSharedValue,
@@ -68,41 +70,74 @@ export const BREATH_LAYER_ORDER = [
   'center-ring'
 ] as const;
 
-export const BREATH_TEST_IDS = {
-  canvas: 'breathing-canvas',
-  layers: {
-    glow: 'breath-layer-glow',
-    halo: 'breath-layer-halo',
-    veil: 'breath-layer-veil',
-    core: 'breath-layer-core',
-    highlight: 'breath-layer-highlight',
-    texture: 'breath-layer-texture',
-    'center-core': 'breath-layer-center-core',
-    'center-ring': 'breath-layer-center-ring'
-  },
-  gradients: {
-    glow: 'breath-gradient-glow',
-    veil: 'breath-gradient-veil',
-    core: 'breath-gradient-core'
-  },
-  particlePrefix: 'breath-particle-',
-  particleGradientPrefix: 'breath-particle-gradient-'
-} as const;
+export type BreathLayerName = (typeof BREATH_LAYER_ORDER)[number];
 
-type WithTestID<T> = T & { testID?: string };
+export function BreathLayer({ children }: PropsWithChildren<{ name: BreathLayerName }>) {
+  return <>{children}</>;
+}
 
-const TestableCircle = Circle as ComponentType<WithTestID<ComponentProps<typeof Circle>>>;
-const TestableGroup = Group as ComponentType<WithTestID<ComponentProps<typeof Group>>>;
-const TestableLinearGradient = LinearGradient as ComponentType<
-  WithTestID<ComponentProps<typeof LinearGradient>>
->;
-const TestablePath = Path as ComponentType<WithTestID<ComponentProps<typeof Path>>>;
-const TestableRadialGradient = RadialGradient as ComponentType<
-  WithTestID<ComponentProps<typeof RadialGradient>>
->;
-const TestableTwoPointConicalGradient = TwoPointConicalGradient as ComponentType<
-  WithTestID<ComponentProps<typeof TwoPointConicalGradient>>
->;
+type BreathLinearGradientProps = Pick<
+  ComponentProps<typeof LinearGradient>,
+  'colors' | 'end' | 'positions' | 'start'
+> & {
+  kind: 'linear';
+  name: 'veil';
+};
+
+type BreathRadialGradientProps = Pick<
+  ComponentProps<typeof RadialGradient>,
+  'c' | 'colors' | 'positions' | 'r'
+> & {
+  kind: 'radial';
+  name: 'particle';
+  particleIndex: number;
+};
+
+type BreathTwoPointGradientProps = Pick<
+  ComponentProps<typeof TwoPointConicalGradient>,
+  'colors' | 'end' | 'endR' | 'positions' | 'start' | 'startR'
+> & {
+  kind: 'two-point';
+  name: 'core' | 'glow';
+};
+
+export type BreathGradientProps =
+  | BreathLinearGradientProps
+  | BreathRadialGradientProps
+  | BreathTwoPointGradientProps;
+
+export function BreathGradient(props: BreathGradientProps) {
+  if (props.kind === 'linear') {
+    return (
+      <LinearGradient
+        colors={props.colors}
+        end={props.end}
+        positions={props.positions}
+        start={props.start}
+      />
+    );
+  }
+  if (props.kind === 'radial') {
+    return (
+      <RadialGradient
+        c={props.c}
+        colors={props.colors}
+        positions={props.positions}
+        r={props.r}
+      />
+    );
+  }
+  return (
+    <TwoPointConicalGradient
+      colors={props.colors}
+      end={props.end}
+      endR={props.endR}
+      positions={props.positions}
+      start={props.start}
+      startR={props.startR}
+    />
+  );
+}
 
 export const BREATH_RENDER_SPEC = {
   canvasSize: 640,
@@ -230,32 +265,57 @@ export function resolveBreathingCanvasFrame(
   props: BreathingCanvasProps,
   visualTimeMs: number
 ): BreathingCanvasFrame {
+  const kind = resolveKind(props);
+  return resolveBreathingVisualFrame(
+    {
+      kind,
+      phaseDurationMs: props.phaseDurationMs,
+      phaseProgress: props.phaseProgress,
+      reducedMotion: props.reducedMotion,
+      status: props.status
+    },
+    visualTimeMs
+  );
+}
+
+type BreathingVisualFrameInput = {
+  kind: BreathVisualKind;
+  phaseDurationMs: number;
+  phaseProgress: number;
+  reducedMotion: boolean;
+  status: SessionClockSnapshot['status'];
+};
+
+function resolveBreathingVisualFrame(
+  input: BreathingVisualFrameInput,
+  visualTimeMs: number
+): BreathingCanvasFrame {
   'worklet';
-  const isReady = props.status === 'idle';
-  const isCompletedStatus = props.status === 'completed';
-  const kind = isCompletedStatus
-    ? 'complete'
-    : isReady
-      ? 'ready'
-      : resolveBreathVisualKind(props.phases, props.phaseIndex, props.phaseKind);
-  let progress = clamp01(props.phaseProgress);
+  const isReady = input.status === 'idle';
+  const isCompletedStatus = input.status === 'completed';
+  let progress = clamp01(input.phaseProgress);
 
   if (isReady) {
     progress = loopProgress(visualTimeMs, BREATH_RENDER_SPEC.readyDurationMs);
   } else if (isCompletedStatus) {
-    progress = loopProgress(visualTimeMs, Math.max(1_000, props.phaseDurationMs));
+    progress = loopProgress(visualTimeMs, Math.max(1_000, input.phaseDurationMs));
   }
 
   const motionVisualTimeMs =
-    props.status === 'paused'
-      ? clamp01(props.phaseProgress) * Math.max(1_000, props.phaseDurationMs)
+    input.status === 'paused'
+      ? clamp01(input.phaseProgress) * Math.max(1_000, input.phaseDurationMs)
       : visualTimeMs;
 
   return {
-    kind,
+    kind: input.kind,
     progress,
     visualTimeMs: motionVisualTimeMs,
-    motion: getBreathMotion(kind, progress, motionVisualTimeMs, props.reducedMotion)
+    motion: getBreathMotion(
+      input.kind,
+      progress,
+      motionVisualTimeMs,
+      input.reducedMotion
+    )
   };
 }
 
@@ -299,55 +359,84 @@ function resolveKind(props: BreathingCanvasProps): BreathVisualKind {
   return resolveBreathVisualKind(props.phases, props.phaseIndex, props.phaseKind);
 }
 
+export type BreathTransitionSnapshot = Pick<
+  BreathingVisualFrameInput,
+  'kind' | 'reducedMotion' | 'status'
+>;
+
+export type BreathTransitionDirective = 'animate' | 'none' | 'snap';
+
+export function resolveBreathTransitionDirective(
+  previous: BreathTransitionSnapshot,
+  next: BreathTransitionSnapshot
+): BreathTransitionDirective {
+  if (next.status === 'paused') {
+    return previous.status !== 'paused' ||
+      previous.kind !== next.kind ||
+      previous.reducedMotion !== next.reducedMotion
+      ? 'snap'
+      : 'none';
+  }
+  return previous.kind !== next.kind ||
+    previous.reducedMotion !== next.reducedMotion
+    ? 'animate'
+    : 'none';
+}
+
 export function BreathingCanvas(props: BreathingCanvasProps) {
   const { width } = useWindowDimensions();
   const canvasSize = width <= 380 ? Math.min(width * 0.86, 340) : Math.min(width * 0.78, 342);
   const coordinateScale = canvasSize / BREATH_RENDER_SPEC.canvasSize;
   const clock = useClock();
-  const phaseProgress = useSharedValue(props.phaseProgress);
-  const transitionAmount = useSharedValue(1);
-  const initialFrame = useMemo(
-    () => resolveBreathingCanvasFrame(props, props.fixtureVisualTimeMs ?? 0),
-    // The initial shared value is intentionally constructed once. Prop changes flow through
-    // the authoritative shared progress and target-frame derivation below.
-    []
+  const visualKind = resolveKind(props);
+  const nextInput: BreathingVisualFrameInput = {
+    kind: visualKind,
+    phaseDurationMs: props.phaseDurationMs,
+    phaseProgress: props.phaseProgress,
+    reducedMotion: props.reducedMotion,
+    status: props.status
+  };
+  const initialInputRef = useRef<BreathingVisualFrameInput | null>(null);
+  if (initialInputRef.current === null) {
+    initialInputRef.current = nextInput;
+  }
+  const initialFrameRef = useRef<BreathingCanvasFrame | null>(null);
+  if (initialFrameRef.current === null) {
+    initialFrameRef.current = resolveBreathingVisualFrame(
+      initialInputRef.current,
+      props.fixtureVisualTimeMs ?? 0
+    );
+  }
+
+  const visualKindValue = useSharedValue(initialInputRef.current.kind);
+  const phaseProgress = useSharedValue(initialInputRef.current.phaseProgress);
+  const phaseDurationMs = useSharedValue(initialInputRef.current.phaseDurationMs);
+  const renderStatus = useSharedValue(initialInputRef.current.status);
+  const reducedMotion = useSharedValue(initialInputRef.current.reducedMotion);
+  const fixtureVisualTimeMs = useSharedValue<number | null>(
+    props.fixtureVisualTimeMs ?? null
   );
-  const previousMotion = useSharedValue<BreathMotion>(initialFrame.motion);
-  const previousInput = useRef(props);
+  const transitionAmount = useSharedValue(1);
+  const previousMotion = useSharedValue<BreathMotion>(
+    initialFrameRef.current.motion
+  );
+  const previousInput = useRef(initialInputRef.current);
 
-  useEffect(() => {
-    phaseProgress.value = clamp01(props.phaseProgress);
-  }, [phaseProgress, props.phaseProgress]);
-
-  const visualTime = useDerivedValue(() => props.fixtureVisualTimeMs ?? clock.value);
+  const visualTime = useDerivedValue(
+    () => fixtureVisualTimeMs.value ?? clock.value
+  );
   const targetFrame = useDerivedValue(() =>
-    resolveBreathingCanvasFrame(
-      { ...props, phaseProgress: phaseProgress.value },
+    resolveBreathingVisualFrame(
+      {
+        kind: visualKindValue.value,
+        phaseDurationMs: phaseDurationMs.value,
+        phaseProgress: phaseProgress.value,
+        reducedMotion: reducedMotion.value,
+        status: renderStatus.value
+      },
       visualTime.value
     )
   );
-
-  useEffect(() => {
-    const oldInput = previousInput.current;
-    const oldKind = resolveKind(oldInput);
-    const newKind = resolveKind(props);
-    if (oldKind !== newKind || oldInput.reducedMotion !== props.reducedMotion) {
-      const now = props.fixtureVisualTimeMs ?? clock.value;
-      previousMotion.value = resolveBreathingCanvasFrame(oldInput, now).motion;
-      transitionAmount.value = 0;
-      transitionAmount.value = withTiming(1, {
-        duration: getBreathTransitionMs(props.reducedMotion),
-        easing: Easing.linear
-      });
-    }
-    previousInput.current = props;
-  }, [
-    clock,
-    previousMotion,
-    props,
-    transitionAmount
-  ]);
-
   const motion = useDerivedValue(() =>
     mixBreathMotion(
       previousMotion.value,
@@ -355,13 +444,71 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
       easeOutCubic(transitionAmount.value)
     )
   );
+
+  useEffect(() => {
+    const oldInput = previousInput.current;
+    const directive = resolveBreathTransitionDirective(oldInput, nextInput);
+    if (directive === 'snap') {
+      cancelAnimation(transitionAmount);
+      previousMotion.value = resolveBreathingVisualFrame(
+        nextInput,
+        props.fixtureVisualTimeMs ?? clock.value
+      ).motion;
+      transitionAmount.value = 1;
+    } else if (directive === 'animate') {
+      const currentMotion = motion.value;
+      cancelAnimation(transitionAmount);
+      previousMotion.value = currentMotion;
+      transitionAmount.value = 0;
+      transitionAmount.value = withTiming(1, {
+        duration: getBreathTransitionMs(props.reducedMotion),
+        easing: Easing.linear
+      });
+    }
+    previousInput.current = nextInput;
+  }, [
+    clock,
+    motion,
+    previousMotion,
+    props.fixtureVisualTimeMs,
+    props.phaseDurationMs,
+    props.phaseProgress,
+    props.reducedMotion,
+    props.status,
+    transitionAmount,
+    visualKind
+  ]);
+
+  useEffect(() => {
+    visualKindValue.value = visualKind;
+    phaseDurationMs.value = props.phaseDurationMs;
+    phaseProgress.value = clamp01(props.phaseProgress);
+    reducedMotion.value = props.reducedMotion;
+    renderStatus.value = props.status;
+    fixtureVisualTimeMs.value = props.fixtureVisualTimeMs ?? null;
+  }, [
+    fixtureVisualTimeMs,
+    phaseDurationMs,
+    phaseProgress,
+    props.fixtureVisualTimeMs,
+    props.phaseDurationMs,
+    props.phaseProgress,
+    props.reducedMotion,
+    props.status,
+    reducedMotion,
+    renderStatus,
+    visualKind,
+    visualKindValue
+  ]);
+
   const radius = useDerivedValue(
     () => BREATH_RENDER_SPEC.canvasSize * BREATH_RENDER_SPEC.baseRadiusFraction * motion.value.scale
   );
   const timeSeconds = useDerivedValue(() => targetFrame.value.visualTimeMs / 1_000);
 
-  const haloPath = useDerivedValue(() =>
-    createOrganicBlobPath({
+  const haloPath = usePathValue((path) => {
+    'worklet';
+    appendOrganicBlobPath(path, {
       cx: 0,
       cy: 0,
       radius: radius.value * BREATH_RENDER_SPEC.halo.radius,
@@ -371,10 +518,11 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
       seed: BREATH_RENDER_SPEC.halo.seed,
       scaleX: BREATH_RENDER_SPEC.halo.scaleX,
       scaleY: BREATH_RENDER_SPEC.halo.scaleY
-    })
-  );
-  const veilPath = useDerivedValue(() =>
-    createOrganicBlobPath({
+    });
+  });
+  const veilPath = usePathValue((path) => {
+    'worklet';
+    appendOrganicBlobPath(path, {
       cx: 0,
       cy: 0,
       radius: radius.value * BREATH_RENDER_SPEC.veil.radius,
@@ -384,10 +532,11 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
       seed: BREATH_RENDER_SPEC.veil.seed,
       scaleX: BREATH_RENDER_SPEC.veil.scaleX,
       scaleY: BREATH_RENDER_SPEC.veil.scaleY
-    })
-  );
-  const corePath = useDerivedValue(() =>
-    createOrganicBlobPath({
+    });
+  });
+  const corePath = usePathValue((path) => {
+    'worklet';
+    appendOrganicBlobPath(path, {
       cx: 0,
       cy: 0,
       radius: radius.value * BREATH_RENDER_SPEC.core.radius,
@@ -399,10 +548,11 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
       seed: BREATH_RENDER_SPEC.core.seed,
       scaleX: BREATH_RENDER_SPEC.core.scaleX,
       scaleY: BREATH_RENDER_SPEC.core.scaleY
-    })
-  );
-  const highlightPath = useDerivedValue(() =>
-    createOrganicBlobPath({
+    });
+  });
+  const highlightPath = usePathValue((path) => {
+    'worklet';
+    appendOrganicBlobPath(path, {
       cx: -radius.value * Math.abs(BREATH_RENDER_SPEC.highlight.centerX),
       cy: -radius.value * Math.abs(BREATH_RENDER_SPEC.highlight.centerY),
       radius: radius.value * BREATH_RENDER_SPEC.highlight.radius,
@@ -412,8 +562,8 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
       seed: BREATH_RENDER_SPEC.highlight.seed,
       scaleX: BREATH_RENDER_SPEC.highlight.scaleX,
       scaleY: BREATH_RENDER_SPEC.highlight.scaleY
-    })
-  );
+    });
+  });
 
   const rootTransform = useDerivedValue(() => [
     { translateX: BREATH_RENDER_SPEC.canvasSize / 2 },
@@ -494,117 +644,119 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
 
   return (
     <Canvas
-      testID={BREATH_TEST_IDS.canvas}
+      testID="breathing-canvas"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={{ width: canvasSize, height: canvasSize, opacity: 0.96 }}
     >
       <Group transform={[{ scale: coordinateScale }]}>
         <Group transform={rootTransform}>
-          <TestableCircle
-            testID={BREATH_TEST_IDS.layers.glow}
-            cx={0}
-            cy={0}
-            r={glowCircleRadius}
-            opacity={glowOpacity}
-          >
-            <TestableTwoPointConicalGradient
-              testID={BREATH_TEST_IDS.gradients.glow}
-              start={vec(0, 0)}
-              startR={glowInnerRadius}
-              end={vec(0, 0)}
-              endR={glowOuterRadius}
-              colors={[...BREATH_RENDER_SPEC.glow.colors]}
-              positions={[...BREATH_RENDER_SPEC.glow.positions]}
+          <BreathLayer name="glow">
+            <Circle cx={0} cy={0} r={glowCircleRadius} opacity={glowOpacity}>
+              <BreathGradient
+                kind="two-point"
+                name="glow"
+                start={vec(0, 0)}
+                startR={glowInnerRadius}
+                end={vec(0, 0)}
+                endR={glowOuterRadius}
+                colors={[...BREATH_RENDER_SPEC.glow.colors]}
+                positions={[...BREATH_RENDER_SPEC.glow.positions]}
+              />
+              <BlurMask
+                blur={BREATH_RENDER_SPEC.glow.blur}
+                style="normal"
+                respectCTM={false}
+              />
+            </Circle>
+          </BreathLayer>
+
+          <BreathLayer name="halo">
+            <Path
+              path={haloPath}
+              color={BREATH_RENDER_SPEC.halo.color}
+              opacity={haloOpacity}
             />
-            <BlurMask blur={BREATH_RENDER_SPEC.glow.blur} style="normal" respectCTM={false} />
-          </TestableCircle>
+          </BreathLayer>
 
-          <TestablePath
-            testID={BREATH_TEST_IDS.layers.halo}
-            path={haloPath}
-            color={BREATH_RENDER_SPEC.halo.color}
-            opacity={haloOpacity}
-          />
+          <BreathLayer name="veil">
+            <Group transform={veilTransform} opacity={veilOpacity}>
+              <Path path={veilPath}>
+                <BreathGradient
+                  kind="linear"
+                  name="veil"
+                  start={veilGradientStart}
+                  end={veilGradientEnd}
+                  colors={[...BREATH_RENDER_SPEC.veil.colors]}
+                  positions={[...BREATH_RENDER_SPEC.veil.positions]}
+                />
+              </Path>
+            </Group>
+          </BreathLayer>
 
-          <TestableGroup
-            testID={BREATH_TEST_IDS.layers.veil}
-            transform={veilTransform}
-            opacity={veilOpacity}
-          >
-            <Path path={veilPath}>
-              <TestableLinearGradient
-                testID={BREATH_TEST_IDS.gradients.veil}
-                start={veilGradientStart}
-                end={veilGradientEnd}
-                colors={[...BREATH_RENDER_SPEC.veil.colors]}
-                positions={[...BREATH_RENDER_SPEC.veil.positions]}
+          <BreathLayer name="core">
+            <Path path={corePath} opacity={coreOpacity}>
+              <BreathGradient
+                kind="two-point"
+                name="core"
+                start={coreGradientStart}
+                startR={coreGradientStartRadius}
+                end={vec(0, 0)}
+                endR={coreGradientEndRadius}
+                colors={[...BREATH_RENDER_SPEC.core.colors]}
+                positions={[...BREATH_RENDER_SPEC.core.positions]}
               />
             </Path>
-          </TestableGroup>
+          </BreathLayer>
 
-          <TestablePath
-            testID={BREATH_TEST_IDS.layers.core}
-            path={corePath}
-            opacity={coreOpacity}
-          >
-            <TestableTwoPointConicalGradient
-              testID={BREATH_TEST_IDS.gradients.core}
-              start={coreGradientStart}
-              startR={coreGradientStartRadius}
-              end={vec(0, 0)}
-              endR={coreGradientEndRadius}
-              colors={[...BREATH_RENDER_SPEC.core.colors]}
-              positions={[...BREATH_RENDER_SPEC.core.positions]}
+          <BreathLayer name="highlight">
+            <Path
+              path={highlightPath}
+              color={BREATH_RENDER_SPEC.highlight.color}
+              opacity={BREATH_RENDER_SPEC.highlight.alpha}
             />
-          </TestablePath>
+          </BreathLayer>
 
-          <TestablePath
-            testID={BREATH_TEST_IDS.layers.highlight}
-            path={highlightPath}
-            color={BREATH_RENDER_SPEC.highlight.color}
-            opacity={BREATH_RENDER_SPEC.highlight.alpha}
-          />
+          <BreathLayer name="texture">
+            <Group blendMode={BREATH_RENDER_SPEC.texture.blendMode}>
+              {BREATH_TEXTURE.map((particle, index) => (
+                <BreathParticle
+                  key={index}
+                  index={index}
+                  particle={particle}
+                  radius={radius}
+                  motion={motion}
+                  timeSeconds={timeSeconds}
+                />
+              ))}
+            </Group>
+          </BreathLayer>
 
-          <TestableGroup
-            testID={BREATH_TEST_IDS.layers.texture}
-            blendMode={BREATH_RENDER_SPEC.texture.blendMode}
-          >
-            {BREATH_TEXTURE.map((particle, index) => (
-              <BreathParticle
-                key={index}
-                index={index}
-                particle={particle}
-                radius={radius}
-                motion={motion}
-                timeSeconds={timeSeconds}
-              />
-            ))}
-          </TestableGroup>
-
-          <TestableCircle
-            testID={BREATH_TEST_IDS.layers['center-core']}
-            cx={0}
-            cy={0}
-            r={centerRadius}
-            color={BREATH_RENDER_SPEC.center.color}
-            opacity={centerOpacity}
-          />
-          <TestableCircle
-            testID={BREATH_TEST_IDS.layers['center-ring']}
-            cx={0}
-            cy={0}
-            r={centerRingRadius}
-            color={BREATH_RENDER_SPEC.center.color}
-            opacity={BREATH_RENDER_SPEC.center.ringAlpha}
-          />
+          <BreathLayer name="center-core">
+            <Circle
+              cx={0}
+              cy={0}
+              r={centerRadius}
+              color={BREATH_RENDER_SPEC.center.color}
+              opacity={centerOpacity}
+            />
+          </BreathLayer>
+          <BreathLayer name="center-ring">
+            <Circle
+              cx={0}
+              cy={0}
+              r={centerRingRadius}
+              color={BREATH_RENDER_SPEC.center.color}
+              opacity={BREATH_RENDER_SPEC.center.ringAlpha}
+            />
+          </BreathLayer>
         </Group>
       </Group>
     </Canvas>
   );
 }
 
-type BreathParticleProps = {
+export type BreathParticleProps = {
   index: number;
   particle: BreathTextureParticle;
   radius: SharedValue<number>;
@@ -612,7 +764,13 @@ type BreathParticleProps = {
   timeSeconds: SharedValue<number>;
 };
 
-function BreathParticle({ index, particle, radius, motion, timeSeconds }: BreathParticleProps) {
+export function BreathParticle({
+  index,
+  particle,
+  radius,
+  motion,
+  timeSeconds
+}: BreathParticleProps) {
   const center = useDerivedValue(() => {
     const driftAngle =
       particle.angle +
@@ -640,14 +798,16 @@ function BreathParticle({ index, particle, radius, motion, timeSeconds }: Breath
   const centerColor = `rgba(255, 255, 255, ${particle.alpha * BREATH_RENDER_SPEC.texture.alphaScale})`;
 
   return (
-    <TestableCircle testID={`${BREATH_TEST_IDS.particlePrefix}${index}`} c={center} r={size}>
-      <TestableRadialGradient
-        testID={`${BREATH_TEST_IDS.particleGradientPrefix}${index}`}
+    <Circle c={center} r={size}>
+      <BreathGradient
+        kind="radial"
+        name="particle"
+        particleIndex={index}
         c={center}
         r={size}
         colors={[centerColor, 'rgba(255, 255, 255, 0)']}
         positions={[0, 1]}
       />
-    </TestableCircle>
+    </Circle>
   );
 }
