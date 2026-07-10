@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { colors, layout, radii, spacing } from '../theme/tokens';
+import { useVisualQaRegistration } from '../qa/VisualQaReporter';
 import { AppText } from './AppText';
 
 export type PrototypeButtonProps = Omit<PressableProps, 'children'> & {
@@ -16,6 +17,7 @@ export type PrototypeButtonProps = Omit<PressableProps, 'children'> & {
   variant?: 'primary' | 'quiet';
   loading?: boolean;
   labelStyle?: StyleProp<TextStyle>;
+  visualQaId?: string;
 };
 
 export function PrototypeButton({
@@ -28,8 +30,12 @@ export function PrototypeButton({
   accessibilityLabel,
   accessibilityState,
   style,
+  visualQaId,
+  nativeID,
+  testID,
   ...pressableProps
 }: PrototypeButtonProps) {
+  const visualQaRegistration = useVisualQaRegistration(visualQaId);
   const isDisabled = disabled || loading;
   const buttonStyle: PressableProps['style'] = (state) => {
     const callerStyle = typeof style === 'function' ? style(state) : style;
@@ -51,8 +57,11 @@ export function PrototypeButton({
       accessibilityRole="button"
       accessibilityState={{ ...accessibilityState, busy: loading, disabled: isDisabled }}
       disabled={isDisabled}
+      nativeID={visualQaId ?? nativeID}
       onPress={isDisabled ? undefined : onPress}
+      ref={visualQaId ? visualQaRegistration.ref : undefined}
       style={buttonStyle}
+      testID={testID ?? visualQaId}
     >
       {loading ? (
         <ActivityIndicator

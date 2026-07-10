@@ -395,6 +395,7 @@ describe('BottomPillNav', () => {
       height: layout.navHeight,
       borderRadius: layout.navRadius
     });
+    expect(view.UNSAFE_getByProps({ nativeID: 'bottom-nav' })).toBeTruthy();
     expect(StyleSheet.flatten(view.getByTestId('bottom-pill-records').props.style)).toMatchObject({
       backgroundColor: colors.activeNav
     });

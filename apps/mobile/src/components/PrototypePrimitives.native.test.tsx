@@ -112,6 +112,27 @@ describe('AppText', () => {
       fontFamily: fontFamilies.body
     });
   });
+
+  it('registers a visual QA text ID without discarding caller text-layout handling', () => {
+    const onTextLayout = jest.fn();
+    const view = render(
+      <AppText
+        onTextLayout={onTextLayout}
+        testID="caller-copy"
+        visualQaId="qa-copy"
+      >
+        可测量文案
+      </AppText>
+    );
+    const copy = view.getByTestId('caller-copy');
+
+    expect(copy.props.nativeID).toBe('qa-copy');
+    expect(copy.props.testID).toBe('caller-copy');
+    fireEvent(copy, 'textLayout', {
+      nativeEvent: { lines: [{ text: '可测量文案' }] }
+    });
+    expect(onTextLayout).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('PrototypeScreen', () => {
@@ -169,6 +190,33 @@ describe('PrototypeScreen', () => {
       paddingHorizontal: layout.screenGutter,
       width: '100%'
     });
+  });
+
+  it('registers the screen root as a visual QA node without replacing its caller test ID', () => {
+    const view = render(
+      <PrototypeScreen testID="caller-screen" visualQaId="qa-screen">
+        <AppText>Fixture</AppText>
+      </PrototypeScreen>
+    );
+
+    expect(view.getByTestId('caller-screen').props.nativeID).toBe('qa-screen');
+  });
+
+  it('can register the existing content frame independently from the screen root', () => {
+    const view = render(
+      <PrototypeScreen
+        scrollable
+        testID="caller-screen"
+        visualQaContentId="qa-content"
+      >
+        <AppText>Fixture</AppText>
+      </PrototypeScreen>
+    );
+
+    expect(view.getByTestId('caller-screen').props.nativeID).toBeUndefined();
+    expect(view.getByTestId('caller-screen-content').props.nativeID).toBe(
+      'qa-content'
+    );
   });
 
   it('uses the compact gutter at 380 points and can scroll with keyboard avoidance', () => {
@@ -342,6 +390,18 @@ describe('PrototypeIconButton', () => {
 });
 
 describe('PrototypeButton', () => {
+  it('registers the pressable itself as a visual QA node', () => {
+    const view = render(
+      <PrototypeButton
+        label="开始"
+        testID="caller-button"
+        visualQaId="qa-button"
+      />
+    );
+
+    expect(view.getByTestId('caller-button').props.nativeID).toBe('qa-button');
+  });
+
   it('renders only the primary and quiet visual contracts with a 44-point minimum target', () => {
     const view = render(
       <View>

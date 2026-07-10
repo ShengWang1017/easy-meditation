@@ -30,6 +30,22 @@ type AuthSessionBoundaryProps = {
   children: ReactNode;
 };
 
+export function AuthSessionProvider({
+  children,
+  value
+}: {
+  children: ReactNode;
+  value: AuthSessionContextValue;
+}) {
+  return (
+    <AuthSessionContext.Provider value={value}>
+      <PreferencesStoreProvider store={value.preferencesStore}>
+        {children}
+      </PreferencesStoreProvider>
+    </AuthSessionContext.Provider>
+  );
+}
+
 type PreparedSession = AuthSessionContextValue & {
   revision: number;
 };
@@ -164,13 +180,7 @@ export function AuthSessionBoundary({ children }: AuthSessionBoundaryProps) {
     );
   }
 
-  return (
-    <AuthSessionContext.Provider value={contextValue}>
-      <PreferencesStoreProvider store={contextValue.preferencesStore}>
-        {children}
-      </PreferencesStoreProvider>
-    </AuthSessionContext.Provider>
-  );
+  return <AuthSessionProvider value={contextValue}>{children}</AuthSessionProvider>;
 }
 
 export function useAuthSession(): AuthSessionContextValue {

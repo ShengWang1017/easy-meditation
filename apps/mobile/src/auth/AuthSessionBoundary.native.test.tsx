@@ -78,9 +78,15 @@ jest.mock('expo-router', () => {
       React.createElement(Text, { testID: 'root-redirect' }, href),
     Slot: () => mockRouterState.renderSlot(),
     Stack,
+    useGlobalSearchParams: () => ({}),
+    usePathname: () => '/login',
     useSegments: () => mockRouterState.segments
   };
 });
+jest.mock('../qa/VisualQaFixtureBoundary', () => ({
+  VisualQaFixtureBoundary: ({ fallback }: { fallback: React.ReactNode }) =>
+    fallback
+}));
 jest.mock('../theme/PrototypeFontBoundary', () => ({
   PrototypeFontBoundary: ({ children }: { children: React.ReactNode }) => children
 }));

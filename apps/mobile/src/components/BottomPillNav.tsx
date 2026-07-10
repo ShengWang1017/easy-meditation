@@ -2,6 +2,7 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { colors, layout, typography } from '../theme/tokens';
+import { useVisualQaRegistration } from '../qa/VisualQaReporter';
 import { AppText } from './AppText';
 
 const TAB_LABELS: Record<string, '冥想' | '记录'> = {
@@ -14,6 +15,7 @@ export function BottomPillNav({
   navigation,
   insets
 }: BottomTabBarProps) {
+  const visualQaRegistration = useVisualQaRegistration('bottom-nav');
   const routes = state.routes
     .filter((route) => route.name in TAB_LABELS)
     .slice(0, 2);
@@ -26,6 +28,9 @@ export function BottomPillNav({
       <View
         accessibilityLabel="主导航"
         accessibilityRole="tablist"
+        collapsable={false}
+        nativeID="bottom-nav"
+        ref={visualQaRegistration.ref}
         style={styles.pill}
         testID="bottom-pill-nav"
       >

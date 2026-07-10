@@ -232,6 +232,19 @@ describe('CustomRhythmScreen', () => {
         (list) => list.props.nestedScrollEnabled === true
       )
     ).toBe(true);
+    for (const id of [
+      'custom-settings-header',
+      'custom-panel',
+      'custom-cycle-row',
+      'custom-wheel-grid',
+      'custom-target-row',
+      'custom-start',
+      'custom-title',
+      'custom-cycle-label',
+      'custom-target-label'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
 
     fireEvent.press(view.getByRole('button', { name: '开始呼吸' }));
     await waitFor(() =>

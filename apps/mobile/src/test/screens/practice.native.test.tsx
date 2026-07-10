@@ -198,6 +198,16 @@ describe('PracticeScreen', () => {
     expect(
       view.getByText('了解每项呼吸训练的工作原理并获取帮助您练习的提示。')
     ).toBeTruthy();
+    for (const id of [
+      'training-header',
+      'training-intro',
+      'mode-grid',
+      'before-card',
+      'training-title',
+      'training-intro-copy'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
 
     fireEvent.press(view.getByRole('button', { name: '开始盒式呼吸法' }));
     expect(mockRouter.push).toHaveBeenCalledWith({

@@ -8,6 +8,7 @@ import { PrototypeIconButton } from '../src/components/PrototypeIconButton';
 import { PrototypeScreen } from '../src/components/PrototypeScreen';
 import { ScrollWheelPicker } from '../src/components/ScrollWheelPicker';
 import type { CustomDurationMinutes } from '../src/domain/customRhythm';
+import { useVisualQaRegistration } from '../src/qa/VisualQaReporter';
 import { usePreferencesStore } from '../src/store/PreferencesStoreProvider';
 import { referenceImages } from '../src/theme/assets';
 import { colors, shadows } from '../src/theme/tokens';
@@ -41,6 +42,11 @@ export default function CustomRhythmScreen() {
     'back' | 'start' | null
   >(null);
   const [retryPending, setRetryPending] = useState(false);
+  const headerQa = useVisualQaRegistration('custom-settings-header');
+  const panelQa = useVisualQaRegistration('custom-panel');
+  const cycleRowQa = useVisualQaRegistration('custom-cycle-row');
+  const wheelGridQa = useVisualQaRegistration('custom-wheel-grid');
+  const targetRowQa = useVisualQaRegistration('custom-target-row');
   const cycleSeconds =
     customRhythm.inhaleSeconds +
     customRhythm.holdSeconds +
@@ -115,6 +121,9 @@ export default function CustomRhythmScreen() {
       testID="custom-screen"
     >
       <View
+        collapsable={false}
+        nativeID="custom-settings-header"
+        ref={headerQa.ref}
         style={[styles.header, compact ? styles.headerCompact : null]}
         testID="custom-header"
       >
@@ -132,20 +141,31 @@ export default function CustomRhythmScreen() {
           style={[styles.title, compact ? styles.titleCompact : null]}
           testID="custom-title"
           variant="displayTitle"
+          visualQaId="custom-title"
         >
           设置呼吸方式
         </AppText>
       </View>
 
       <View
+        collapsable={false}
+        nativeID="custom-panel"
+        ref={panelQa.ref}
         style={[styles.panel, compact ? styles.panelCompact : null]}
         testID="custom-picker-panel"
       >
-        <View style={styles.cycleRow} testID="custom-cycle-row">
+        <View
+          collapsable={false}
+          nativeID="custom-cycle-row"
+          ref={cycleRowQa.ref}
+          style={styles.cycleRow}
+          testID="custom-cycle-row"
+        >
           <AppText
             numberOfLines={1}
             style={[styles.cycleLabel, compact ? styles.cycleLabelCompact : null]}
             variant="displaySection"
+            visualQaId="custom-cycle-label"
           >
             每个周期的时间
           </AppText>
@@ -169,6 +189,9 @@ export default function CustomRhythmScreen() {
 
         <View
           accessibilityLabel="每个周期的时间"
+          collapsable={false}
+          nativeID="custom-wheel-grid"
+          ref={wheelGridQa.ref}
           style={[
             styles.wheelGrid,
             compact ? styles.wheelGridCompact : null
@@ -200,10 +223,17 @@ export default function CustomRhythmScreen() {
 
         <View style={styles.divider} />
 
-        <View style={styles.targetRow} testID="custom-target-row">
+        <View
+          collapsable={false}
+          nativeID="custom-target-row"
+          ref={targetRowQa.ref}
+          style={styles.targetRow}
+          testID="custom-target-row"
+        >
           <AppText
             numberOfLines={1}
             style={[styles.targetLabel, compact ? styles.targetLabelCompact : null]}
+            visualQaId="custom-target-label"
           >
             呼吸目标时间
           </AppText>
@@ -255,6 +285,7 @@ export default function CustomRhythmScreen() {
         onPress={startCustomSession}
         style={styles.start}
         testID="custom-start"
+        visualQaId="custom-start"
       />
     </PrototypeScreen>
   );

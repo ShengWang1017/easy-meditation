@@ -5,6 +5,7 @@ import { AppText } from '../src/components/AppText';
 import { PrototypeIconButton } from '../src/components/PrototypeIconButton';
 import { PrototypeScreen } from '../src/components/PrototypeScreen';
 import { referenceImages } from '../src/theme/assets';
+import { useVisualQaRegistration } from '../src/qa/VisualQaReporter';
 import { colors, shadows } from '../src/theme/tokens';
 
 const GUIDE_ITEMS = [
@@ -29,6 +30,10 @@ const GUIDE_ITEMS = [
 export default function GuideScreen() {
   const { width } = useWindowDimensions();
   const compact = width <= 380;
+  const headerQa = useVisualQaRegistration('guide-header');
+  const copyQa = useVisualQaRegistration('guide-copy');
+  const panelQa = useVisualQaRegistration('guide-panel');
+  const listQa = useVisualQaRegistration('guide-list');
 
   function goBack() {
     if (router.canGoBack()) {
@@ -45,7 +50,13 @@ export default function GuideScreen() {
       scrollable
       testID="guide-screen"
     >
-      <View style={styles.header} testID="guide-header">
+      <View
+        collapsable={false}
+        nativeID="guide-header"
+        ref={headerQa.ref}
+        style={styles.header}
+        testID="guide-header"
+      >
         <PrototypeIconButton
           accessibilityLabel="返回呼吸训练首页"
           imageStyle={styles.backImage}
@@ -59,6 +70,7 @@ export default function GuideScreen() {
           style={[styles.headerTitle, compact ? styles.headerTitleCompact : null]}
           testID="guide-header-title"
           variant="displayTitle"
+          visualQaId="guide-title"
         >
           练习指南
         </AppText>
@@ -66,13 +78,17 @@ export default function GuideScreen() {
       </View>
 
       <View
+        collapsable={false}
         style={[styles.copy, compact ? styles.copyCompact : null]}
+        nativeID="guide-copy"
+        ref={copyQa.ref}
         testID="guide-copy"
       >
         <AppText
           style={[styles.kicker, compact ? styles.kickerCompact : null]}
           testID="guide-kicker"
           variant="label"
+          visualQaId="guide-kicker"
         >
           开始前读一小段就好
         </AppText>
@@ -80,12 +96,16 @@ export default function GuideScreen() {
           style={[styles.heading, compact ? styles.headingCompact : null]}
           testID="guide-heading"
           variant="displayTitle"
+          visualQaId="guide-heading"
         >
           呼吸训练让注意力有一个温柔的落点。
         </AppText>
 
         <View
+          collapsable={false}
           style={[styles.panel, compact ? styles.panelCompact : null]}
+          nativeID="guide-panel"
+          ref={panelQa.ref}
           testID="guide-panel"
         >
           <AppText
@@ -97,12 +117,19 @@ export default function GuideScreen() {
           <AppText
             style={[styles.body, compact ? styles.bodyCompact : null]}
             testID="guide-panel-body"
+            visualQaId="guide-panel-body"
           >
             有节奏地吸气、停留和呼气，会让身体从紧绷里慢慢退出来。你不需要“清空大脑”，只要一次次回到下一次呼吸。
           </AppText>
         </View>
 
-        <View style={styles.list} testID="guide-list">
+        <View
+          collapsable={false}
+          nativeID="guide-list"
+          ref={listQa.ref}
+          style={styles.list}
+          testID="guide-list"
+        >
           {GUIDE_ITEMS.map((item, index) => (
             <View
               key={item.title}

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { referenceImages } from '../theme/assets';
+import { useVisualQaRegistration } from '../qa/VisualQaReporter';
 import { colors, layout, shadows, typography } from '../theme/tokens';
 import { AppText } from './AppText';
 
@@ -26,6 +27,7 @@ export function BeforeStartCard({
   const compact = width <= 380;
   const [isDismissing, setIsDismissing] = useState(false);
   const [dismissFailed, setDismissFailed] = useState(false);
+  const visualQaRegistration = useVisualQaRegistration('before-card');
 
   async function dismiss(event?: GestureResponderEvent) {
     event?.stopPropagation();
@@ -46,6 +48,9 @@ export function BeforeStartCard({
 
   return (
     <View
+      collapsable={false}
+      nativeID="before-card"
+      ref={visualQaRegistration.ref}
       style={[styles.card, compact ? styles.cardCompact : null]}
       testID="before-start-card-shell"
     >

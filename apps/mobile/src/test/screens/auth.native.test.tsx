@@ -108,6 +108,16 @@ describe('LoginScreen', () => {
     expect(view.getByRole('link', { name: '创建新账号' }).props.accessibilityHint).toBe(
       '/(auth)/register'
     );
+    for (const id of [
+      'auth-screen',
+      'auth-form',
+      'auth-actions',
+      'auth-eyebrow',
+      'auth-title',
+      'auth-subtitle'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
     fireEvent.press(view.getByRole('link', { name: '创建新账号' }));
     expect(mockLinkNavigate).toHaveBeenCalledWith('/(auth)/register');
 
@@ -243,6 +253,16 @@ describe('RegisterScreen', () => {
     expect(view.getByRole('link', { name: '已有账号，去登录' }).props.accessibilityHint).toBe(
       '/(auth)/login'
     );
+    for (const id of [
+      'auth-screen',
+      'auth-form',
+      'auth-actions',
+      'auth-eyebrow',
+      'auth-title',
+      'auth-subtitle'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
     fireEvent.press(view.getByRole('link', { name: '已有账号，去登录' }));
     expect(mockLinkNavigate).toHaveBeenCalledWith('/(auth)/login');
 

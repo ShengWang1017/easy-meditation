@@ -18,10 +18,13 @@ import {
   type MergedRecordSession
 } from '../../src/domain/records';
 import { userQueryKeys } from '../../src/query/keys';
+import { useOptionalVisualQaFixtureRuntime } from '../../src/qa/VisualQaFixtureBoundary';
+import { useVisualQaRegistration } from '../../src/qa/VisualQaReporter';
 import { usePreferencesStore } from '../../src/store/PreferencesStoreProvider';
 import { colors } from '../../src/theme/tokens';
 
 export default function RecordsScreen() {
+  const visualQaRuntime = useOptionalVisualQaFixtureRuntime();
   const { userId, sessionOutbox } = useAuthSession();
   const localSessionLedger = usePreferencesStore(
     (state) => state.localSessionLedger
@@ -38,6 +41,8 @@ export default function RecordsScreen() {
   const [retryingIds, setRetryingIds] = useState<Set<string>>(
     () => new Set()
   );
+  const statsQa = useVisualQaRegistration('records-stats');
+  const listQa = useVisualQaRegistration('records-list');
 
   useEffect(() => {
     void sessionOutbox.drainDue().catch(() => undefined);
@@ -64,7 +69,7 @@ export default function RecordsScreen() {
     summary: statsQuery.data ?? null,
     serverSessions: sessionsQuery.data ?? null,
     ledger: localSessionLedger,
-    now: new Date()
+    now: visualQaRuntime ? new Date(visualQaRuntime.now) : new Date()
   });
 
   async function retryServerData() {
@@ -133,6 +138,7 @@ export default function RecordsScreen() {
       contentStyle={styles.content}
       scrollable
       testID="records-screen"
+      visualQaContentId="records-view"
     >
       <View style={styles.hero} testID="records-hero">
         <LinearGradient
@@ -150,7 +156,12 @@ export default function RecordsScreen() {
           <AppText style={styles.kicker} tone="muted" variant="label">
             练习记录
           </AppText>
-          <AppText accessibilityRole="header" style={styles.heroTitle} variant="displayTitle">
+          <AppText
+            accessibilityRole="header"
+            style={styles.heroTitle}
+            variant="displayTitle"
+            visualQaId="records-title"
+          >
             轻轻记住坚持
           </AppText>
         </View>
@@ -164,6 +175,7 @@ export default function RecordsScreen() {
           <AppText
             style={styles.totalValue}
             testID="records-total"
+            visualQaId="records-total"
           >
             {formatRecordDuration(records.totalPracticeSeconds)}
           </AppText>
@@ -188,7 +200,13 @@ export default function RecordsScreen() {
         </View>
       ) : null}
 
-      <View style={styles.stats} testID="records-stats">
+      <View
+        collapsable={false}
+        nativeID="records-stats"
+        ref={statsQa.ref}
+        style={styles.stats}
+        testID="records-stats"
+      >
         <StatCard label="连续天数" value={records.streak.label} />
         <StatCard
           label="本周时长"
@@ -202,7 +220,13 @@ export default function RecordsScreen() {
         serverListTruncated={records.serverListTruncated}
       />
 
-      <View style={styles.list} testID="records-list">
+      <View
+        collapsable={false}
+        nativeID="records-list"
+        ref={listQa.ref}
+        style={styles.list}
+        testID="records-list"
+      >
         {records.recentSessions.length > 0 ? (
           records.recentSessions.map((session) => (
             <RecordRow

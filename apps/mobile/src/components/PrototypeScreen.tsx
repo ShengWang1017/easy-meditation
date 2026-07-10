@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 
+import { useVisualQaRegistration } from '../qa/VisualQaReporter';
 import {
   colors,
   customGradientColors,
@@ -29,6 +30,8 @@ export type PrototypeScreenProps = PropsWithChildren<{
   backgroundVariant?: 'practice' | 'records' | 'guide' | 'focus' | 'custom' | 'auth';
   contentStyle?: StyleProp<ViewStyle>;
   testID?: string;
+  visualQaContentId?: string;
+  visualQaId?: string;
 }>;
 
 type BackgroundVariant = NonNullable<PrototypeScreenProps['backgroundVariant']>;
@@ -98,8 +101,12 @@ export function PrototypeScreen({
   keyboardAvoiding = false,
   backgroundVariant = 'practice',
   contentStyle,
-  testID
+  testID,
+  visualQaContentId,
+  visualQaId
 }: PrototypeScreenProps) {
+  const visualQaRegistration = useVisualQaRegistration(visualQaId);
+  const visualQaContentRegistration = useVisualQaRegistration(visualQaContentId);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const gutter = width > 380 ? layout.screenGutter : layout.compactScreenGutter;
@@ -119,12 +126,24 @@ export function PrototypeScreen({
       showsVerticalScrollIndicator={false}
       style={styles.scrollView}
     >
-      <View style={frameStyle} testID={testID ? `${testID}-content` : undefined}>
+      <View
+        collapsable={visualQaContentId ? false : undefined}
+        nativeID={visualQaContentId}
+        ref={visualQaContentId ? visualQaContentRegistration.ref : undefined}
+        style={frameStyle}
+        testID={testID ? `${testID}-content` : visualQaContentId}
+      >
         {children}
       </View>
     </ScrollView>
   ) : (
-    <View style={frameStyle} testID={testID ? `${testID}-content` : undefined}>
+    <View
+      collapsable={visualQaContentId ? false : undefined}
+      nativeID={visualQaContentId}
+      ref={visualQaContentId ? visualQaContentRegistration.ref : undefined}
+      style={frameStyle}
+      testID={testID ? `${testID}-content` : visualQaContentId}
+    >
       {children}
     </View>
   );
@@ -141,7 +160,13 @@ export function PrototypeScreen({
   );
 
   return (
-    <View style={styles.root} testID={testID}>
+    <View
+      collapsable={false}
+      nativeID={visualQaId}
+      ref={visualQaId ? visualQaRegistration.ref : undefined}
+      style={styles.root}
+      testID={testID ?? visualQaId}
+    >
       <LinearGradient
         colors={gradient.colors as [string, string, ...string[]]}
         locations={gradient.locations as [number, number, ...number[]]}

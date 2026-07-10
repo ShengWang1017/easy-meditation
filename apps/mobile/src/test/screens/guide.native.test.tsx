@@ -73,6 +73,18 @@ describe('GuideScreen', () => {
       backgroundVariant: 'guide',
       scrollable: true
     });
+    for (const id of [
+      'guide-header',
+      'guide-copy',
+      'guide-panel',
+      'guide-list',
+      'guide-title',
+      'guide-kicker',
+      'guide-heading',
+      'guide-panel-body'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
     expect(view.getByTestId('prototype-screen-halo')).toBeTruthy();
   });
 

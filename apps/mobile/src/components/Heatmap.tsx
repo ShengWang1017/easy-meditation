@@ -2,6 +2,7 @@ import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import type { HeatmapDay } from '../domain/records';
+import { useVisualQaRegistration } from '../qa/VisualQaReporter';
 import { AppText } from './AppText';
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'] as const;
@@ -22,6 +23,7 @@ export type HeatmapProps = {
 };
 
 export function Heatmap({ days, serverListTruncated }: HeatmapProps) {
+  const visualQaRegistration = useVisualQaRegistration('records-heatmap');
   const practicedDays = days.filter((day) => day.durationSeconds > 0).length;
   const bestDay = days.reduce<HeatmapDay | null>(
     (best, day) =>
@@ -31,7 +33,13 @@ export function Heatmap({ days, serverListTruncated }: HeatmapProps) {
   const hasBestDay = Boolean(bestDay && bestDay.durationSeconds > 0);
 
   return (
-    <View style={styles.card} testID="records-heatmap">
+    <View
+      collapsable={false}
+      nativeID="records-heatmap"
+      ref={visualQaRegistration.ref}
+      style={styles.card}
+      testID="records-heatmap"
+    >
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <AppText accessibilityRole="header" style={styles.title} variant="cardTitle">

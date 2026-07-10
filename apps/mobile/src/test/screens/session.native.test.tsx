@@ -4,6 +4,7 @@ import type { BreathingMethod } from '@easy-meditation/shared';
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import type { StateStorage } from 'zustand/middleware';
+import type { VisualQaSessionOverride } from '../../qa/visualQaSession';
 
 let mockMethodId = 'box';
 const mockRouter = { back: jest.fn(), replace: jest.fn() };
@@ -12,6 +13,7 @@ let mockSession: Record<string, unknown>;
 let mockFocusOptions: Record<string, unknown> | undefined;
 let mockFocusOptionsHistory: Record<string, unknown>[] = [];
 let mockExitOptions: Record<string, unknown> | undefined;
+let mockVisualQaOverride: VisualQaSessionOverride | null = null;
 
 const mockController = {
   snapshot: sessionSnapshot('idle'),
@@ -40,6 +42,16 @@ const mockExitController = {
   retryAndLeave: jest.fn(async () => undefined),
   requestExplicitEnd: jest.fn(async () => undefined)
 };
+const mockUseFocusSession = jest.fn((options: Record<string, unknown>) => {
+  mockFocusOptions = options;
+  mockFocusOptionsHistory.push(options);
+  return mockController;
+});
+const mockUseSessionExitGuard = jest.fn((options: Record<string, unknown>) => {
+  mockExitOptions = options;
+  return mockExitController;
+});
+const mockUseSessionAudio = jest.fn(() => mockAudio);
 
 jest.mock(
   '@easy-meditation/shared',
@@ -98,20 +110,18 @@ jest.mock('../../auth/AuthSessionBoundary', () => ({
   useAuthSession: () => mockSession
 }));
 jest.mock('../../hooks/useFocusSession', () => ({
-  useFocusSession: (options: Record<string, unknown>) => {
-    mockFocusOptions = options;
-    mockFocusOptionsHistory.push(options);
-    return mockController;
-  }
+  useFocusSession: (options: Record<string, unknown>) =>
+    mockUseFocusSession(options)
 }), { virtual: true });
 jest.mock('../../hooks/useSessionExitGuard', () => ({
-  useSessionExitGuard: (options: Record<string, unknown>) => {
-    mockExitOptions = options;
-    return mockExitController;
-  }
+  useSessionExitGuard: (options: Record<string, unknown>) =>
+    mockUseSessionExitGuard(options)
 }), { virtual: true });
 jest.mock('../../audio/useSessionAudio', () => ({
-  useSessionAudio: () => mockAudio
+  useSessionAudio: () => mockUseSessionAudio()
+}));
+jest.mock('../../qa/visualQaSession', () => ({
+  useVisualQaSessionOverride: () => mockVisualQaOverride
 }));
 jest.mock('../../components/BreathingCanvas', () => {
   const ReactModule = jest.requireActual<typeof import('react')>('react');
@@ -259,6 +269,7 @@ describe('SessionScreen', () => {
     mockFocusOptions = undefined;
     mockFocusOptionsHistory = [];
     mockExitOptions = undefined;
+    mockVisualQaOverride = null;
     mockController.snapshot = sessionSnapshot('idle');
     mockController.isPersisting = false;
     mockController.persistenceError = null;
@@ -283,6 +294,15 @@ describe('SessionScreen', () => {
       phases: boxMethod.phases,
       phaseKind: 'inhale'
     });
+    for (const id of [
+      'focus-start-view',
+      'focus-title',
+      'breath-stage',
+      'focus-duration',
+      'focus-start'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
     expect(mockFocusOptions?.method).toMatchObject({
       id: 'box',
       title: '盒式呼吸法',
@@ -294,6 +314,39 @@ describe('SessionScreen', () => {
     expect(mockController.start).toHaveBeenCalledTimes(1);
     fireEvent.press(view.getByRole('button', { name: '关闭声音' }));
     expect(mockAudio.toggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a fixed QA snapshot without mounting live session side effects', async () => {
+    mockVisualQaOverride = {
+      controller: {
+        ...mockController,
+        snapshot: sessionSnapshot('running')
+      },
+      fixtureVisualTimeMs: 2_000
+    };
+
+    const view = await renderSession({ cachedMethods: [boxMethod] });
+
+    await waitFor(() => expect(view.getByText('00:58')).toBeTruthy());
+    expect(view.getByTestId('breathing-canvas').props).toMatchObject({
+      fixtureVisualTimeMs: 2_000,
+      phaseKind: 'inhale',
+      phaseProgress: 0.5,
+      status: 'running'
+    });
+    for (const id of [
+      'focus-running-view',
+      'focus-phase-readout',
+      'breath-stage',
+      'focus-actions',
+      'focus-phase-copy',
+      'focus-timer'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
+    expect(mockUseFocusSession).not.toHaveBeenCalled();
+    expect(mockUseSessionExitGuard).not.toHaveBeenCalled();
+    expect(mockUseSessionAudio).not.toHaveBeenCalled();
   });
 
   it('resolves custom phases and duration exclusively from the local rhythm', async () => {

@@ -22,6 +22,7 @@ import {
   type MethodPresentationSlot
 } from '../../src/domain/methodPresentation';
 import { publicQueryKeys } from '../../src/query/keys';
+import { useVisualQaRegistration } from '../../src/qa/VisualQaReporter';
 import { usePreferencesStore } from '../../src/store/PreferencesStoreProvider';
 import { referenceImages } from '../../src/theme/assets';
 import { colors, layout, typography } from '../../src/theme/tokens';
@@ -64,6 +65,9 @@ export default function PracticeScreen() {
   const [activeDurationId, setActiveDurationId] =
     useState<BuiltInMethodId | null>(null);
   const [dismissPending, setDismissPending] = useState(false);
+  const trainingHeaderQa = useVisualQaRegistration('training-header');
+  const trainingIntroQa = useVisualQaRegistration('training-intro');
+  const modeGridQa = useVisualQaRegistration('mode-grid');
   const activeDurationAvailable =
     activeDurationId !== null &&
     methodsQuery.data?.some((method) => method.id === activeDurationId) === true;
@@ -246,7 +250,13 @@ export default function PracticeScreen() {
         />
       ) : null}
 
-      <View style={styles.header} testID="practice-header">
+      <View
+        collapsable={false}
+        nativeID="training-header"
+        ref={trainingHeaderQa.ref}
+        style={styles.header}
+        testID="practice-header"
+      >
         <PrototypeIconButton
           accessibilityLabel="返回呼吸训练首页"
           imageStyle={styles.headerIcon}
@@ -259,6 +269,7 @@ export default function PracticeScreen() {
           numberOfLines={1}
           style={styles.headerTitle}
           variant="displayTitle"
+          visualQaId="training-title"
         >
           呼吸训练
         </AppText>
@@ -271,13 +282,19 @@ export default function PracticeScreen() {
         />
       </View>
 
-      <View style={[styles.intro, compact ? styles.introCompact : null]}>
+      <View
+        collapsable={false}
+        nativeID="training-intro"
+        ref={trainingIntroQa.ref}
+        style={[styles.intro, compact ? styles.introCompact : null]}
+      >
         <AppText
           style={[
             styles.introText,
             compact ? styles.introTextCompact : null
           ]}
           variant="displayTitle"
+          visualQaId="training-intro-copy"
         >
           选择要进行的呼吸训练。
         </AppText>
@@ -298,11 +315,14 @@ export default function PracticeScreen() {
       ) : null}
 
       <View
+        collapsable={false}
         style={[
           styles.grid,
           { gap: compact ? layout.compactGridGap : layout.gridGap },
           visibleActiveDurationId ? styles.gridWithPopover : null
         ]}
+        nativeID="mode-grid"
+        ref={modeGridQa.ref}
         testID="practice-mode-grid"
       >
         {[viewModels.slice(0, 2), viewModels.slice(2, 4)].map((row, rowIndex) => (

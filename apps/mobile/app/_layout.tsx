@@ -1,19 +1,42 @@
 import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Redirect, Slot, Stack, useSegments } from 'expo-router';
+import {
+  Redirect,
+  Slot,
+  Stack,
+  useGlobalSearchParams,
+  usePathname,
+  useSegments
+} from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { AuthSessionBoundary } from '../src/auth/AuthSessionBoundary';
 import { InlineState } from '../src/components/InlineState';
 import { appQueryClient } from '../src/query/client';
+import { VisualQaFixtureBoundary } from '../src/qa/VisualQaFixtureBoundary';
 import { useAuthStore } from '../src/store/authStore';
 import '../src/theme/assets';
 import { PrototypeFontBoundary } from '../src/theme/PrototypeFontBoundary';
 import { colors, spacing } from '../src/theme/tokens';
 
-function RootNavigator() {
+function ProtectedStack() {
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen
+        name="session/[methodId]"
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+          headerBackButtonMenuEnabled: false
+        }}
+      />
+    </Stack>
+  );
+}
+
+function NormalRootNavigator() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const isRestoring = useAuthStore((state) => state.isRestoring);
   const restoreError = useAuthStore((state) => state.restoreError);
@@ -65,17 +88,27 @@ function RootNavigator() {
 
   return (
     <AuthSessionBoundary>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen
-          name="session/[methodId]"
-          options={{
-            headerShown: false,
-            gestureEnabled: false,
-            headerBackButtonMenuEnabled: false
-          }}
-        />
-      </Stack>
+      <ProtectedStack />
     </AuthSessionBoundary>
+  );
+}
+
+function RootNavigator() {
+  const params = useGlobalSearchParams<{ visualQaState?: string | string[] }>();
+  const pathname = usePathname();
+
+  return (
+    <VisualQaFixtureBoundary
+      dev={__DEV__}
+      fallback={<NormalRootNavigator />}
+      pathname={pathname}
+      requested={process.env.EXPO_PUBLIC_VISUAL_QA === '1'}
+      state={params.visualQaState}
+    >
+      {(fixture) =>
+        fixture.authScope === 'unauthenticated' ? <Slot /> : <ProtectedStack />
+      }
+    </VisualQaFixtureBoundary>
   );
 }
 

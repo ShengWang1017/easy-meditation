@@ -8,7 +8,10 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
 import { fetchBreathingMethods } from '../../src/api/methods';
-import { useSessionAudio } from '../../src/audio/useSessionAudio';
+import {
+  useSessionAudio,
+  type UseSessionAudioResult
+} from '../../src/audio/useSessionAudio';
 import { useAuthSession } from '../../src/auth/AuthSessionBoundary';
 import { AppText } from '../../src/components/AppText';
 import { BreathingCanvas } from '../../src/components/BreathingCanvas';
@@ -24,9 +27,20 @@ import {
 } from '../../src/domain/methodPresentation';
 import type { LocalSessionLedgerEntry } from '../../src/domain/sessionLedger';
 import type { ResolvedSessionMethod } from '../../src/domain/sessionRecord';
-import { useFocusSession } from '../../src/hooks/useFocusSession';
-import { useSessionExitGuard } from '../../src/hooks/useSessionExitGuard';
+import {
+  useFocusSession,
+  type FocusSessionController
+} from '../../src/hooks/useFocusSession';
+import {
+  useSessionExitGuard,
+  type SessionExitGuardController
+} from '../../src/hooks/useSessionExitGuard';
 import { publicQueryKeys } from '../../src/query/keys';
+import { useVisualQaRegistration } from '../../src/qa/VisualQaReporter';
+import {
+  useVisualQaSessionOverride,
+  type VisualQaSessionOverride
+} from '../../src/qa/visualQaSession';
 import { usePreferencesStore } from '../../src/store/PreferencesStoreProvider';
 import { referenceImages, referenceSoundIcons } from '../../src/theme/assets';
 import { colors, layout, radii, spacing } from '../../src/theme/tokens';
@@ -196,6 +210,19 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
     runBundleRef.current = snapshotSessionMethodBundle(bundle);
   }
   const runBundle = runBundleRef.current;
+  const visualQaOverride = useVisualQaSessionOverride();
+
+  return visualQaOverride ? (
+    <VisualQaFocusSessionView
+      bundle={runBundle}
+      override={visualQaOverride}
+    />
+  ) : (
+    <LiveFocusSessionView bundle={runBundle} />
+  );
+}
+
+function LiveFocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
   const navigation = useNavigation();
   const reducedMotion = useReducedMotion();
   const { preferencesStore, sessionOutbox } = useAuthSession();
@@ -211,8 +238,8 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
     setPreferenceEnabled: setSoundEnabled
   });
   const controller = useFocusSession({
-    method: runBundle.resolved,
-    clockMethod: runBundle.clockMethod,
+    method: bundle.resolved,
+    clockMethod: bundle.clockMethod,
     putLedgerEntry,
     outbox: sessionOutbox,
     audio
@@ -226,9 +253,92 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
     retryPersistence: controller.retryPersistence,
     navigation
   });
+  return (
+    <FocusSessionPresentation
+      audio={audio}
+      bundle={bundle}
+      controller={controller}
+      exitGuard={exitGuard}
+      onGoBack={() => navigation.goBack()}
+      reducedMotion={reducedMotion}
+    />
+  );
+}
+
+function VisualQaFocusSessionView({
+  bundle,
+  override
+}: {
+  bundle: SessionMethodBundle;
+  override: VisualQaSessionOverride;
+}) {
+  const navigation = useNavigation();
+  const soundEnabled = usePreferencesStore((state) => state.soundEnabled);
+  const audio = useMemo<UseSessionAudioResult>(
+    () => ({
+      enabled: soundEnabled,
+      note: null,
+      toggle: async () => undefined,
+      play: async () => undefined,
+      resetForReplay: () => undefined
+    }),
+    [soundEnabled]
+  );
+  const exitGuard = useMemo<SessionExitGuardController>(
+    () => ({
+      dialogVisible: false,
+      isPersisting: false,
+      persistenceError: null,
+      continueSession: () => undefined,
+      endAndLeave: async () => undefined,
+      retryAndLeave: async () => undefined,
+      requestExplicitEnd: async () => undefined
+    }),
+    []
+  );
+
+  return (
+    <FocusSessionPresentation
+      audio={audio}
+      bundle={bundle}
+      controller={override.controller}
+      exitGuard={exitGuard}
+      fixtureVisualTimeMs={override.fixtureVisualTimeMs}
+      onGoBack={() => navigation.goBack()}
+      reducedMotion={false}
+    />
+  );
+}
+
+function FocusSessionPresentation({
+  audio,
+  bundle: runBundle,
+  controller,
+  exitGuard,
+  fixtureVisualTimeMs,
+  onGoBack,
+  reducedMotion
+}: {
+  audio: UseSessionAudioResult;
+  bundle: SessionMethodBundle;
+  controller: FocusSessionController;
+  exitGuard: SessionExitGuardController;
+  fixtureVisualTimeMs?: number;
+  onGoBack(): void;
+  reducedMotion: boolean;
+}) {
   const { snapshot } = controller;
   const isReady = snapshot.status === 'idle';
   const isCompleted = snapshot.status === 'completed';
+  const sessionViewId = isReady ? 'focus-start-view' : 'focus-running-view';
+  const sessionViewQa = useVisualQaRegistration(sessionViewId);
+  const phaseReadoutQa = useVisualQaRegistration(
+    isReady ? undefined : 'focus-phase-readout'
+  );
+  const stageQa = useVisualQaRegistration('breath-stage');
+  const actionsQa = useVisualQaRegistration(
+    isReady ? undefined : 'focus-actions'
+  );
   const phase = runBundle.resolved.phases[snapshot.phase.phaseIndex];
   const phaseDurationMs = (phase?.durationSeconds ?? 1) * 1_000;
   const durationMinutes = runBundle.resolved.plannedDurationSeconds / 60;
@@ -244,13 +354,16 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
     >
       <View
         accessibilityLabel={runBundle.resolved.title}
+        collapsable={false}
+        nativeID={sessionViewId}
+        ref={sessionViewQa.ref}
         style={styles.session}
         testID="focus-session"
       >
         {isReady ? (
           <PrototypeIconButton
             accessibilityLabel="返回"
-            onPress={() => navigation.goBack()}
+            onPress={onGoBack}
             source={referenceImages.back}
             style={styles.backButton}
           />
@@ -267,11 +380,17 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
           <SoundIcon height={30} width={30} />
         </Pressable>
 
-        <View style={styles.phaseReadout}>
+        <View
+          collapsable={false}
+          nativeID={isReady ? undefined : 'focus-phase-readout'}
+          ref={isReady ? undefined : phaseReadoutQa.ref}
+          style={styles.phaseReadout}
+        >
           <AppText
             accessibilityLiveRegion={isReady ? undefined : 'polite'}
             style={styles.phaseLabel}
             variant="displayHero"
+            visualQaId={isReady ? 'focus-title' : 'focus-phase-copy'}
           >
             {isReady ? '准备' : isCompleted ? '完成' : snapshot.phase.label}
           </AppText>
@@ -284,8 +403,14 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
           )}
         </View>
 
-        <View style={styles.stage}>
+        <View
+          collapsable={false}
+          nativeID="breath-stage"
+          ref={stageQa.ref}
+          style={styles.stage}
+        >
           <BreathingCanvas
+            fixtureVisualTimeMs={fixtureVisualTimeMs}
             phaseDurationMs={phaseDurationMs}
             phaseIndex={snapshot.phase.phaseIndex}
             phaseKind={snapshot.phase.kind}
@@ -297,7 +422,12 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
         </View>
 
         <View style={styles.timerBlock}>
-          <AppText systemFont style={styles.timerValue} variant="timer">
+          <AppText
+            systemFont
+            style={styles.timerValue}
+            variant="timer"
+            visualQaId={isReady ? 'focus-duration' : 'focus-timer'}
+          >
             {isReady
               ? `${durationMinutes} 分钟`
               : isCompleted
@@ -328,7 +458,12 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
           </View>
         ) : null}
 
-        <View style={styles.actions}>
+        <View
+          collapsable={false}
+          nativeID={isReady ? undefined : 'focus-actions'}
+          ref={isReady ? undefined : actionsQa.ref}
+          style={styles.actions}
+        >
           {isReady ? (
             <PrototypeButton
               label="开始"
@@ -336,6 +471,7 @@ function FocusSessionView({ bundle }: { bundle: SessionMethodBundle }) {
               onPress={controller.start}
               style={styles.startButton}
               variant="quiet"
+              visualQaId="focus-start"
             />
           ) : (
             <>

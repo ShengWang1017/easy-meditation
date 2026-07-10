@@ -3,6 +3,7 @@ import { Link } from 'expo-router';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 
 import { referenceImages } from '../theme/assets';
+import { useVisualQaRegistration } from '../qa/VisualQaReporter';
 import { layout, radii, spacing } from '../theme/tokens';
 import { AppText } from './AppText';
 import { PrototypeScreen } from './PrototypeScreen';
@@ -25,6 +26,7 @@ export function AuthScaffold({
   subtitle,
   children
 }: AuthScaffoldProps) {
+  const formQa = useVisualQaRegistration('auth-form');
   return (
     <PrototypeScreen
       backgroundVariant="auth"
@@ -32,8 +34,14 @@ export function AuthScaffold({
       keyboardAvoiding
       scrollable
       testID="auth-screen"
+      visualQaId="auth-screen"
     >
-      <View style={styles.formShell}>
+      <View
+        collapsable={false}
+        nativeID="auth-form"
+        ref={formQa.ref}
+        style={styles.formShell}
+      >
         <View style={styles.header}>
           <Image
             accessibilityElementsHidden
@@ -43,13 +51,19 @@ export function AuthScaffold({
             source={referenceImages.dandelion}
             style={styles.logo}
           />
-          <AppText tone="teal" variant="label">
+          <AppText tone="teal" variant="label" visualQaId="auth-eyebrow">
             {eyebrow}
           </AppText>
-          <AppText accessibilityRole="header" variant="displayTitle">
+          <AppText
+            accessibilityRole="header"
+            variant="displayTitle"
+            visualQaId="auth-title"
+          >
             {title}
           </AppText>
-          <AppText tone="muted">{subtitle}</AppText>
+          <AppText tone="muted" visualQaId="auth-subtitle">
+            {subtitle}
+          </AppText>
         </View>
         {children}
       </View>

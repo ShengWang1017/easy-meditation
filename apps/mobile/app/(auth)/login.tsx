@@ -11,6 +11,7 @@ import {
   type AuthFormErrors
 } from '../../src/domain/authFormErrors';
 import { useAuthStore } from '../../src/store/authStore';
+import { useVisualQaRegistration } from '../../src/qa/VisualQaReporter';
 import { radii, spacing } from '../../src/theme/tokens';
 
 export default function LoginScreen() {
@@ -23,6 +24,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<AuthFormErrors>({ fields: {} });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const actionsQa = useVisualQaRegistration('auth-actions');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -105,7 +107,13 @@ export default function LoginScreen() {
         />
       </View>
 
-      <View style={styles.actions} testID="login-actions">
+      <View
+        collapsable={false}
+        nativeID="auth-actions"
+        ref={actionsQa.ref}
+        style={styles.actions}
+        testID="login-actions"
+      >
         {errors.form ? (
           <AppText
             accessibilityLiveRegion="polite"

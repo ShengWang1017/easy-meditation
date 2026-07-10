@@ -11,6 +11,8 @@ import type { StateStorage } from 'zustand/middleware';
 
 const mockDrainDue = jest.fn(async (): Promise<void> => undefined);
 const mockRetryNow = jest.fn(async (_clientSessionId: string): Promise<void> => undefined);
+const mockDeriveMergedRecords = jest.fn();
+let mockVisualQaRuntime: { now: string } | null = null;
 let mockAuthSession = {
   userId: 'user-a',
   sessionOutbox: {
@@ -58,6 +60,23 @@ jest.mock('../../auth/AuthSessionBoundary', () => ({
 }));
 jest.mock('../../api/stats', () => ({ fetchStatsSummary: jest.fn() }));
 jest.mock('../../api/sessions', () => ({ fetchPracticeSessions: jest.fn() }));
+jest.mock('../../domain/records', () => {
+  const actual = jest.requireActual<typeof import('../../domain/records')>(
+    '../../domain/records'
+  );
+  return {
+    ...actual,
+    deriveMergedRecords: (
+      options: Parameters<typeof actual.deriveMergedRecords>[0]
+    ) => {
+      mockDeriveMergedRecords(options);
+      return actual.deriveMergedRecords(options);
+    }
+  };
+});
+jest.mock('../../qa/VisualQaFixtureBoundary', () => ({
+  useOptionalVisualQaFixtureRuntime: () => mockVisualQaRuntime
+}));
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
   __esModule: true,
   default: () => ({ width: 390, height: 844, scale: 3, fontScale: 1 })
@@ -223,6 +242,7 @@ describe('RecordsScreen', () => {
     jest.clearAllMocks();
     mockDrainDue.mockResolvedValue(undefined);
     mockRetryNow.mockResolvedValue(undefined);
+    mockVisualQaRuntime = null;
     mockAuthSession = {
       userId: 'user-a',
       sessionOutbox: {
@@ -288,6 +308,20 @@ describe('RecordsScreen', () => {
     expect(view.getByText('7月10日')).toBeTruthy();
     expect(view.getByText('2 分 5 秒')).toBeTruthy();
     expect(view.queryByTestId('bottom-pill-nav')).toBeNull();
+    for (const id of [
+      'records-view',
+      'records-stats',
+      'records-heatmap',
+      'records-list',
+      'records-title',
+      'records-total'
+    ]) {
+      expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
+    }
+    expect(view.getByTestId('records-screen').props.nativeID).toBeUndefined();
+    expect(view.getByTestId('records-screen-content').props.nativeID).toBe(
+      'records-view'
+    );
     expect(StyleSheet.flatten(view.getByTestId('records-screen-content').props.style))
       .toMatchObject({ gap: 11, paddingBottom: 88, paddingTop: 4 });
     expect(StyleSheet.flatten(view.getByTestId('records-hero').props.style))
@@ -332,6 +366,20 @@ describe('RecordsScreen', () => {
       expect(view.getByText('完成一次练习后会出现在这里')).toBeTruthy()
     );
     expect(view.queryByText('还没有练习记录')).toBeNull();
+  });
+
+  it('uses the fixed fixture clock only while the visual QA runtime is active', async () => {
+    mockVisualQaRuntime = { now: '2026-07-10T12:00:00+08:00' };
+    const store = await preferencesStore('user-a');
+    const view = renderRecords(store);
+
+    await waitFor(() =>
+      expect(view.getByText('完成一次练习后会出现在这里')).toBeTruthy()
+    );
+    const lastCall = mockDeriveMergedRecords.mock.calls.at(-1)?.[0] as
+      | { now: Date }
+      | undefined;
+    expect(lastCall?.now.toISOString()).toBe('2026-07-10T04:00:00.000Z');
   });
 
   it('does not block local records on a never-settling outbox drain or server queries', async () => {
