@@ -205,13 +205,39 @@ describe('PrototypeScreen', () => {
       const radial = view.UNSAFE_getByType(RadialGradient);
       const circle = view.UNSAFE_getByType(Circle);
       const stops = view.UNSAFE_getAllByType(Stop);
+      const root = view.getByTestId(`${variant}-screen`);
+      const childContainsTestID = (child: unknown, testID: string) => {
+        if (typeof child !== 'object' || child === null) {
+          return false;
+        }
+
+        const node = child as {
+          props: { testID?: string };
+          findAllByProps: (props: { testID: string }) => unknown[];
+        };
+        return node.props.testID === testID || node.findAllByProps({ testID }).length > 0;
+      };
+      const haloIndex = root.children.findIndex((child: unknown) =>
+        childContainsTestID(child, 'prototype-screen-halo')
+      );
+      const safeAreaIndex = root.children.findIndex((child: unknown) =>
+        childContainsTestID(child, 'prototype-screen-safe-area')
+      );
 
       expect(svg.props.pointerEvents).toBe('none');
-      expect(radial.props).toMatchObject({ cx: '50%', cy: centerY, r: radius });
+      expect(radial.props).toMatchObject({
+        cx: '50%',
+        cy: centerY,
+        gradientUnits: 'userSpaceOnUse',
+        r: radius
+      });
       expect(circle.props).toMatchObject({ cx: '50%', cy: centerY, r: radius });
       expect(stops.map((stop) => stop.props.offset)).toEqual([0, 144 / radius, 1]);
       expect(stops.map((stop) => stop.props.stopColor)).toEqual(['#ffffff', '#ffffff', '#ffffff']);
       expect(stops.map((stop) => stop.props.stopOpacity)).toEqual([alpha, alpha, 0]);
+      expect(haloIndex).toBeGreaterThanOrEqual(0);
+      expect(safeAreaIndex).toBeGreaterThanOrEqual(0);
+      expect(haloIndex).toBeLessThan(safeAreaIndex);
     }
   );
 
@@ -267,6 +293,46 @@ describe('PrototypeIconButton', () => {
     fireEvent.press(button);
     expect(onPress).not.toHaveBeenCalled();
   });
+
+  it('preserves the minimum target against static and callback styles while allowing larger sizes', () => {
+    const view = render(
+      <View>
+        <PrototypeIconButton
+          accessibilityLabel="静态缩小"
+          source={referenceImages.info}
+          style={{ height: 10, minHeight: 10, minWidth: 10, width: 10 }}
+          testID="icon-static-small"
+        />
+        <PrototypeIconButton
+          accessibilityLabel="回调缩小"
+          source={referenceImages.info}
+          style={() => ({ height: 12, minHeight: 12, minWidth: 12, width: 12 })}
+          testID="icon-callback-small"
+        />
+        <PrototypeIconButton
+          accessibilityLabel="放大"
+          source={referenceImages.info}
+          style={{ height: 64, minHeight: 64, minWidth: 68, width: 68 }}
+          testID="icon-large"
+        />
+      </View>
+    );
+
+    expect(StyleSheet.flatten(view.getByTestId('icon-static-small').props.style)).toMatchObject({
+      minHeight: layout.touchTarget,
+      minWidth: layout.touchTarget
+    });
+    expect(StyleSheet.flatten(view.getByTestId('icon-callback-small').props.style)).toMatchObject({
+      minHeight: layout.touchTarget,
+      minWidth: layout.touchTarget
+    });
+    expect(StyleSheet.flatten(view.getByTestId('icon-large').props.style)).toMatchObject({
+      height: 64,
+      minHeight: 64,
+      minWidth: 68,
+      width: 68
+    });
+  });
 });
 
 describe('PrototypeButton', () => {
@@ -306,6 +372,41 @@ describe('PrototypeButton', () => {
     fireEvent.press(disabledButton);
     expect(onPress).not.toHaveBeenCalled();
   });
+
+  it('preserves the minimum target against static and callback styles while allowing larger sizes', () => {
+    const view = render(
+      <View>
+        <PrototypeButton
+          label="静态缩小"
+          style={{ minHeight: 10, minWidth: 10 }}
+          testID="button-static-small"
+        />
+        <PrototypeButton
+          label="回调缩小"
+          style={() => ({ minHeight: 12, minWidth: 12 })}
+          testID="button-callback-small"
+        />
+        <PrototypeButton
+          label="放大"
+          style={{ minHeight: 64, minWidth: 68 }}
+          testID="button-large"
+        />
+      </View>
+    );
+
+    expect(StyleSheet.flatten(view.getByTestId('button-static-small').props.style)).toMatchObject({
+      minHeight: layout.touchTarget,
+      minWidth: layout.touchTarget
+    });
+    expect(StyleSheet.flatten(view.getByTestId('button-callback-small').props.style)).toMatchObject({
+      minHeight: layout.touchTarget,
+      minWidth: layout.touchTarget
+    });
+    expect(StyleSheet.flatten(view.getByTestId('button-large').props.style)).toMatchObject({
+      minHeight: 64,
+      minWidth: 68
+    });
+  });
 });
 
 describe('InlineState', () => {
@@ -322,13 +423,16 @@ describe('InlineState', () => {
     empty.unmount();
 
     const warning = render(<InlineState kind="warning" message="当前显示缓存数据" title="更新失败" />);
-    expect(warning.getByRole('alert', { name: '更新失败. 当前显示缓存数据' })).toBeTruthy();
-    expect(warning.getByRole('alert').props.accessibilityViewIsModal).toBe(false);
+    const warningState = warning.getByRole('summary', { name: '更新失败. 当前显示缓存数据' });
+    expect(warningState.props.accessibilityLiveRegion).toBe('polite');
+    expect(warningState.props.accessibilityViewIsModal).toBe(false);
+    expect(warning.queryByRole('alert')).toBeNull();
     warning.unmount();
 
     const error = render(<InlineState kind="error" message="请检查网络后重试" title="无法加载" />);
-    expect(error.getByRole('alert', { name: '无法加载. 请检查网络后重试' })).toBeTruthy();
-    expect(error.getByRole('alert').props.accessibilityViewIsModal).toBe(false);
+    const errorState = error.getByRole('alert', { name: '无法加载. 请检查网络后重试' });
+    expect(errorState.props.accessibilityLiveRegion).toBe('assertive');
+    expect(errorState.props.accessibilityViewIsModal).toBe(false);
   });
 
   it('shows an error retry only when both its label and callback are present', () => {

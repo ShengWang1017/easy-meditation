@@ -5,7 +5,8 @@ import {
   type ImageSourcePropType,
   type ImageStyle,
   type PressableProps,
-  type StyleProp
+  type StyleProp,
+  type ViewStyle
 } from 'react-native';
 
 import { layout } from '../theme/tokens';
@@ -28,10 +29,16 @@ export function PrototypeIconButton({
   ...pressableProps
 }: PrototypeIconButtonProps) {
   const isDisabled = disabled === true;
-  const buttonStyle: PressableProps['style'] =
-    typeof style === 'function'
-      ? (state) => [styles.button, isDisabled ? styles.disabled : null, style(state)]
-      : [styles.button, isDisabled ? styles.disabled : null, style];
+  const buttonStyle: PressableProps['style'] = (state) => {
+    const callerStyle = typeof style === 'function' ? style(state) : style;
+
+    return [
+      styles.button,
+      callerStyle,
+      isDisabled ? styles.disabled : null,
+      minimumTargetStyle(callerStyle)
+    ];
+  };
 
   return (
     <Pressable
@@ -52,6 +59,21 @@ export function PrototypeIconButton({
       />
     </Pressable>
   );
+}
+
+function minimumTargetStyle(style: StyleProp<ViewStyle>) {
+  const flattened = StyleSheet.flatten(style);
+
+  return {
+    minHeight:
+      typeof flattened?.minHeight === 'number'
+        ? Math.max(layout.touchTarget, flattened.minHeight)
+        : layout.touchTarget,
+    minWidth:
+      typeof flattened?.minWidth === 'number'
+        ? Math.max(layout.touchTarget, flattened.minWidth)
+        : layout.touchTarget
+  };
 }
 
 const styles = StyleSheet.create({

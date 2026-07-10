@@ -2,7 +2,9 @@ import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  type PressableProps
+  type PressableProps,
+  type StyleProp,
+  type ViewStyle
 } from 'react-native';
 
 import { colors, layout, radii, spacing } from '../theme/tokens';
@@ -26,22 +28,18 @@ export function PrototypeButton({
   ...pressableProps
 }: PrototypeButtonProps) {
   const isDisabled = disabled || loading;
-  const buttonStyle: PressableProps['style'] =
-    typeof style === 'function'
-      ? (state) => [
-          styles.button,
-          variantStyles[variant],
-          state.pressed && !isDisabled ? styles.pressed : null,
-          isDisabled ? styles.disabled : null,
-          style(state)
-        ]
-      : (state) => [
-          styles.button,
-          variantStyles[variant],
-          state.pressed && !isDisabled ? styles.pressed : null,
-          isDisabled ? styles.disabled : null,
-          style
-        ];
+  const buttonStyle: PressableProps['style'] = (state) => {
+    const callerStyle = typeof style === 'function' ? style(state) : style;
+
+    return [
+      styles.button,
+      variantStyles[variant],
+      callerStyle,
+      state.pressed && !isDisabled ? styles.pressed : null,
+      isDisabled ? styles.disabled : null,
+      minimumTargetStyle(callerStyle)
+    ];
+  };
 
   return (
     <Pressable
@@ -67,6 +65,21 @@ export function PrototypeButton({
   );
 }
 
+function minimumTargetStyle(style: StyleProp<ViewStyle>) {
+  const flattened = StyleSheet.flatten(style);
+
+  return {
+    minHeight:
+      typeof flattened?.minHeight === 'number'
+        ? Math.max(layout.touchTarget, flattened.minHeight)
+        : layout.touchTarget,
+    minWidth:
+      typeof flattened?.minWidth === 'number'
+        ? Math.max(layout.touchTarget, flattened.minWidth)
+        : layout.touchTarget
+  };
+}
+
 const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
@@ -75,6 +88,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     justifyContent: 'center',
     minHeight: layout.touchTarget,
+    minWidth: layout.touchTarget,
     paddingHorizontal: spacing.lg
   },
   primary: {

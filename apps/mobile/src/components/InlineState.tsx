@@ -27,7 +27,7 @@ export function InlineState({
   onAction
 }: InlineStateProps) {
   const resolvedTitle = title ?? defaultTitles[kind];
-  const role = kind === 'loading' ? 'progressbar' : kind === 'empty' ? 'summary' : 'alert';
+  const role = kind === 'loading' ? 'progressbar' : kind === 'error' ? 'alert' : 'summary';
   const showAction = kind === 'error' && Boolean(actionLabel && onAction);
 
   return (
