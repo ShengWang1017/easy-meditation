@@ -10,14 +10,6 @@ export type AuthFormErrors = {
 const GENERIC_REQUEST_ERROR_MESSAGE = '请求失败，请稍后再试。';
 const AUTH_FIELD_NAMES = ['email', 'password', 'nickname'] as const;
 
-function safeMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return GENERIC_REQUEST_ERROR_MESSAGE;
-}
-
 export function getAuthFormErrors(error: unknown): AuthFormErrors {
   if (error instanceof ApiRequestError && error.fields) {
     const fields: AuthFormErrors['fields'] = {};
@@ -34,8 +26,15 @@ export function getAuthFormErrors(error: unknown): AuthFormErrors {
     }
   }
 
+  if (error instanceof ApiRequestError && error.message.trim()) {
+    return {
+      form: error.message.trim(),
+      fields: {}
+    };
+  }
+
   return {
-    form: safeMessage(error),
+    form: GENERIC_REQUEST_ERROR_MESSAGE,
     fields: {}
   };
 }

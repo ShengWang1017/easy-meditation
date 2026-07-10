@@ -81,7 +81,7 @@ describe('AuthTextField', () => {
     expect(view.getByText('请输入有效的邮箱地址。')).toBeTruthy();
   });
 
-  it('uses system text, a 56-point field, and forwards keyboard-order props', () => {
+  it('uses system text, a 56-point minimum that can grow, and forwards keyboard-order props', () => {
     const onSubmitEditing = jest.fn();
     const view = render(
       <AuthTextField
@@ -102,11 +102,12 @@ describe('AuthTextField', () => {
       backgroundColor: colors.surface,
       color: colors.ink,
       fontFamily: fontFamilies.system,
-      height: 56,
-      minHeight: 56
+      minHeight: 56,
+      paddingVertical: 14
     });
+    expect(StyleSheet.flatten(input.props.style).height).toBeUndefined();
     expect(input.props.allowFontScaling).toBe(true);
-    expect(input.props.maxFontSizeMultiplier).toBe(1.2);
+    expect(input.props.maxFontSizeMultiplier).toBeUndefined();
     expect(input.props.returnKeyType).toBe('done');
     expect(input.props.submitBehavior).toBe('blurAndSubmit');
     expect(input.props.secureTextEntry).toBe(true);

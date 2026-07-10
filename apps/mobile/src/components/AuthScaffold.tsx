@@ -1,8 +1,9 @@
 import type { PropsWithChildren } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Link } from 'expo-router';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 
 import { referenceImages } from '../theme/assets';
-import { radii, spacing } from '../theme/tokens';
+import { layout, radii, spacing } from '../theme/tokens';
 import { AppText } from './AppText';
 import { PrototypeScreen } from './PrototypeScreen';
 
@@ -11,6 +12,12 @@ export type AuthScaffoldProps = PropsWithChildren<{
   title: string;
   subtitle: string;
 }>;
+
+export type AuthLinkProps = {
+  href: '/(auth)/login' | '/(auth)/register';
+  label: string;
+  disabled?: boolean;
+};
 
 export function AuthScaffold({
   eyebrow,
@@ -50,6 +57,28 @@ export function AuthScaffold({
   );
 }
 
+export function AuthLink({ href, label, disabled = false }: AuthLinkProps) {
+  return (
+    <Link asChild href={href}>
+      <Pressable
+        accessibilityLabel={label}
+        accessibilityRole="link"
+        accessibilityState={{ disabled }}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.link,
+          disabled ? styles.linkDisabled : null,
+          pressed && !disabled ? styles.linkPressed : null
+        ]}
+      >
+        <AppText style={styles.linkLabel} tone="teal" variant="label">
+          {label}
+        </AppText>
+      </Pressable>
+    </Link>
+  );
+}
+
 const styles = StyleSheet.create({
   screenContent: {
     paddingBottom: spacing.lg,
@@ -68,5 +97,24 @@ const styles = StyleSheet.create({
     height: 72,
     marginBottom: spacing.sm,
     width: 72
+  },
+  link: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    minHeight: layout.touchTarget,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12
+  },
+  linkDisabled: {
+    opacity: 0.45
+  },
+  linkPressed: {
+    opacity: 0.7
+  },
+  linkLabel: {
+    fontSize: 15,
+    lineHeight: 20,
+    textAlign: 'center'
   }
 });

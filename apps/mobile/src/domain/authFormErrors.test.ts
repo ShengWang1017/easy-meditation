@@ -59,9 +59,9 @@ describe('getAuthFormErrors', () => {
     });
   });
 
-  it('uses a safe ordinary Error message as a form error', () => {
+  it('does not expose arbitrary runtime Error messages', () => {
     expect(getAuthFormErrors(new Error('网络暂时不可用。'))).toEqual({
-      form: '网络暂时不可用。',
+      form: '请求失败，请稍后再试。',
       fields: {}
     });
   });

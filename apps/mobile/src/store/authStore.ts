@@ -38,6 +38,7 @@ let cleanupTail: Promise<void> = Promise.resolve();
 let secureStoreMutationTail: Promise<void> = Promise.resolve();
 let terminalClearScheduled = false;
 let tokenPersistenceGeneration = 0;
+let authAttemptGeneration = 0;
 
 function isInvalidRefreshTokenError(error: unknown): error is ApiRequestError {
   return (
@@ -129,8 +130,15 @@ export const useAuthStore = create<AuthState>((set, get) => {
     sessionRevision: 0,
     isTerminating: false,
     async login(input) {
+      const attempt = ++authAttemptGeneration;
       const tokens = await authApi.login(input);
+      if (attempt !== authAttemptGeneration) {
+        return;
+      }
       await queueStoredRefreshTokenWrite(tokens.refreshToken).result;
+      if (attempt !== authAttemptGeneration) {
+        return;
+      }
       set((state) => ({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -142,8 +150,15 @@ export const useAuthStore = create<AuthState>((set, get) => {
       }));
     },
     async register(input) {
+      const attempt = ++authAttemptGeneration;
       const result = await authApi.register(input);
+      if (attempt !== authAttemptGeneration) {
+        return;
+      }
       await queueStoredRefreshTokenWrite(result.tokens.refreshToken).result;
+      if (attempt !== authAttemptGeneration) {
+        return;
+      }
       set((state) => ({
         accessToken: result.tokens.accessToken,
         refreshToken: result.tokens.refreshToken,
@@ -265,6 +280,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       return restorePromise;
     },
     logout() {
+      authAttemptGeneration += 1;
       set({ isTerminating: true });
       return enqueueCleanup(async () => {
         const refreshToken = get().refreshToken;
@@ -275,6 +291,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       });
     },
     clearAuthenticatedSession() {
+      authAttemptGeneration += 1;
       set({ isTerminating: true });
       return enqueueCleanup(finishLocalSessionCleanup);
     },
@@ -284,6 +301,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       }
 
       terminalClearScheduled = true;
+      authAttemptGeneration += 1;
       set({ isTerminating: true });
       setTimeout(() => {
         void get()

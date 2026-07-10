@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react';
-import { Link, router } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { router } from 'expo-router';
 import { StyleSheet, TextInput, View } from 'react-native';
 
-import { AuthScaffold } from '../../src/components/AuthScaffold';
+import { AuthLink, AuthScaffold } from '../../src/components/AuthScaffold';
 import { AuthTextField } from '../../src/components/AuthTextField';
 import { AppText } from '../../src/components/AppText';
 import { PrototypeButton } from '../../src/components/PrototypeButton';
@@ -11,17 +11,26 @@ import {
   type AuthFormErrors
 } from '../../src/domain/authFormErrors';
 import { useAuthStore } from '../../src/store/authStore';
-import { fontFamilies } from '../../src/theme/fonts';
-import { colors, radii, spacing } from '../../src/theme/tokens';
+import { radii, spacing } from '../../src/theme/tokens';
 
 export default function LoginScreen() {
   const login = useAuthStore((state) => state.login);
   const passwordRef = useRef<TextInput>(null);
+  const mountedRef = useRef(false);
+  const attemptRef = useRef(0);
   const submittingRef = useRef(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<AuthFormErrors>({ fields: {} });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      attemptRef.current += 1;
+    };
+  }, []);
 
   async function submit() {
     if (submittingRef.current) {
@@ -29,18 +38,29 @@ export default function LoginScreen() {
     }
 
     submittingRef.current = true;
+    const attempt = ++attemptRef.current;
+    const isCurrentAttempt = () =>
+      mountedRef.current && attemptRef.current === attempt;
     setErrors({ fields: {} });
     setIsSubmitting(true);
 
     try {
       await login({ email, password });
+      if (!isCurrentAttempt()) {
+        return;
+      }
       router.replace('/(tabs)/practice');
     } catch (error) {
+      if (!isCurrentAttempt()) {
+        return;
+      }
       setPassword('');
       setErrors(getAuthFormErrors(error));
     } finally {
-      submittingRef.current = false;
-      setIsSubmitting(false);
+      if (isCurrentAttempt()) {
+        submittingRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   }
 
@@ -103,9 +123,11 @@ export default function LoginScreen() {
           onPress={() => void submit()}
           style={styles.primaryAction}
         />
-        <Link href="/(auth)/register" style={styles.link}>
-          创建新账号
-        </Link>
+        <AuthLink
+          disabled={isSubmitting}
+          href="/(auth)/register"
+          label="创建新账号"
+        />
       </View>
     </AuthScaffold>
   );
@@ -121,16 +143,5 @@ const styles = StyleSheet.create({
   primaryAction: {
     borderRadius: radii.md,
     minHeight: 54
-  },
-  link: {
-    alignSelf: 'stretch',
-    color: colors.teal,
-    fontFamily: fontFamilies.body,
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 20,
-    minHeight: 44,
-    paddingVertical: 12,
-    textAlign: 'center'
   }
 });

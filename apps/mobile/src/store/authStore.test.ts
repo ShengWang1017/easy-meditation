@@ -241,6 +241,58 @@ describe('useAuthStore', () => {
     });
   });
 
+  it('keeps the latest login or registration attempt when an older request resolves last', async () => {
+    let resolveLogin!: (tokens: {
+      accessToken: string;
+      refreshToken: string;
+    }) => void;
+    const delayedLogin = new Promise<{
+      accessToken: string;
+      refreshToken: string;
+    }>((resolve) => {
+      resolveLogin = resolve;
+    });
+    vi.spyOn(authApi, 'login').mockReturnValue(delayedLogin);
+    vi.spyOn(authApi, 'register').mockResolvedValue({
+      user: {
+        id: '3d3ca763-0ed4-4189-bd4e-bc0fb6302b72',
+        email: 'new@example.com',
+        nickname: null,
+        createdAt: '2026-07-08T00:00:00.000Z'
+      },
+      tokens: {
+        accessToken: 'registered-access',
+        refreshToken: 'registered-refresh'
+      }
+    });
+
+    const oldAttempt = useAuthStore.getState().login({
+      email: 'old@example.com',
+      password: 'password123'
+    });
+    await useAuthStore.getState().register({
+      email: 'new@example.com',
+      password: 'password123'
+    });
+
+    resolveLogin({
+      accessToken: 'stale-login-access',
+      refreshToken: 'stale-login-refresh'
+    });
+    await oldAttempt;
+
+    expect(secureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    expect(secureStore.setItemAsync).toHaveBeenCalledWith(
+      'easyMeditation.refreshToken',
+      'registered-refresh'
+    );
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'registered-access',
+      refreshToken: 'registered-refresh',
+      sessionRevision: 1
+    });
+  });
+
   it('revokes the refresh token with the backend before local logout cleanup', async () => {
     useAuthStore.setState({
       accessToken: 'session-access',

@@ -9,6 +9,7 @@ type RegisterInput = { email: string; password: string; nickname?: string };
 const mockLogin = jest.fn<(input: LoginInput) => Promise<void>>();
 const mockRegister = jest.fn<(input: RegisterInput) => Promise<void>>();
 const mockReplace = jest.fn<(href: string) => void>();
+const mockLinkNavigate = jest.fn<(href: string) => void>();
 
 jest.mock('../../store/authStore', () => ({
   useAuthStore: (
@@ -25,18 +26,45 @@ jest.mock('expo-router', () => {
 
   return {
     Link: ({
+      asChild,
       children,
       href,
       style
     }: {
-      children: React.ReactNode;
+      asChild?: boolean;
+      children: React.ReactElement<{
+        accessibilityHint?: string;
+        disabled?: boolean;
+        onPress?: () => void;
+      }> | React.ReactNode;
       href: string;
       style?: TextProps['style'];
-    }) => React.createElement(
-      Text,
-      { accessibilityHint: href, accessibilityRole: 'link', style },
-      children
-    ),
+    }) => {
+      if (asChild && React.isValidElement(children)) {
+        const child = children as React.ReactElement<{
+          accessibilityHint?: string;
+          disabled?: boolean;
+          onPress?: () => void;
+        }>;
+        return React.cloneElement(child, {
+          accessibilityHint: href,
+          onPress: child.props.disabled
+            ? undefined
+            : () => mockLinkNavigate(href)
+        });
+      }
+
+      return React.createElement(
+        Text,
+        {
+          accessibilityHint: href,
+          accessibilityRole: 'link',
+          onPress: () => mockLinkNavigate(href),
+          style
+        },
+        children
+      );
+    },
     router: {
       replace: (href: string) => mockReplace(href)
     }
@@ -63,6 +91,7 @@ describe('LoginScreen', () => {
     mockLogin.mockReset();
     mockRegister.mockReset();
     mockReplace.mockReset();
+    mockLinkNavigate.mockReset();
   });
 
   afterEach(() => {
@@ -79,6 +108,8 @@ describe('LoginScreen', () => {
     expect(view.getByRole('link', { name: '创建新账号' }).props.accessibilityHint).toBe(
       '/(auth)/register'
     );
+    fireEvent.press(view.getByRole('link', { name: '创建新账号' }));
+    expect(mockLinkNavigate).toHaveBeenCalledWith('/(auth)/register');
 
     fireEvent.changeText(view.getByLabelText('邮箱'), 'person@example.com');
     fireEvent.changeText(view.getByLabelText('密码'), 'password123');
@@ -107,8 +138,17 @@ describe('LoginScreen', () => {
       busy: true,
       disabled: true
     });
+    const disabledLink = view.getByRole('link', {
+      name: '创建新账号',
+      disabled: true
+    });
     fireEvent.press(loadingButton);
+    fireEvent.press(disabledLink);
     expect(mockLogin).toHaveBeenCalledTimes(1);
+    expect(mockLinkNavigate).not.toHaveBeenCalled();
+    expect(disabledLink.props.style).toEqual(
+      expect.arrayContaining([expect.objectContaining({ opacity: 0.45 })])
+    );
 
     await act(async () => {
       pending.resolve();
@@ -161,6 +201,24 @@ describe('LoginScreen', () => {
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledTimes(1));
   });
+
+  it('ignores a deferred login result after the screen unmounts', async () => {
+    const pending = deferred<void>();
+    mockLogin.mockReturnValue(pending.promise);
+    const view = renderWithProviders(<LoginScreen />);
+
+    fireEvent.changeText(view.getByLabelText('邮箱'), 'person@example.com');
+    fireEvent.changeText(view.getByLabelText('密码'), 'password123');
+    fireEvent.press(view.getByRole('button', { name: '登录' }));
+    view.unmount();
+
+    await act(async () => {
+      pending.resolve();
+      await pending.promise;
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
 });
 
 describe('RegisterScreen', () => {
@@ -168,6 +226,7 @@ describe('RegisterScreen', () => {
     mockLogin.mockReset();
     mockRegister.mockReset();
     mockReplace.mockReset();
+    mockLinkNavigate.mockReset();
   });
 
   afterEach(() => {
@@ -184,6 +243,8 @@ describe('RegisterScreen', () => {
     expect(view.getByRole('link', { name: '已有账号，去登录' }).props.accessibilityHint).toBe(
       '/(auth)/login'
     );
+    fireEvent.press(view.getByRole('link', { name: '已有账号，去登录' }));
+    expect(mockLinkNavigate).toHaveBeenCalledWith('/(auth)/login');
 
     fireEvent.changeText(view.getByLabelText('邮箱'), 'new@example.com');
     fireEvent.changeText(view.getByLabelText('昵称，可不填'), '  小安  ');
@@ -232,8 +293,17 @@ describe('RegisterScreen', () => {
       busy: true,
       disabled: true
     });
+    const disabledLink = view.getByRole('link', {
+      name: '已有账号，去登录',
+      disabled: true
+    });
     fireEvent.press(loadingButton);
+    fireEvent.press(disabledLink);
     expect(mockRegister).toHaveBeenCalledTimes(1);
+    expect(mockLinkNavigate).not.toHaveBeenCalled();
+    expect(disabledLink.props.style).toEqual(
+      expect.arrayContaining([expect.objectContaining({ opacity: 0.45 })])
+    );
 
     await act(async () => {
       pending.resolve();
@@ -253,7 +323,7 @@ describe('RegisterScreen', () => {
     fireEvent.press(view.getByRole('button', { name: '注册并开始' }));
 
     await waitFor(() => expect(view.getByTestId('register-form-error')).toHaveTextContent(
-      '注册失败，请再试一次。'
+      '请求失败，请稍后再试。'
     ));
     expect(view.getByLabelText('邮箱').props.value).toBe('new@example.com');
     expect(view.getByLabelText('昵称，可不填').props.value).toBe('小安');
@@ -278,5 +348,23 @@ describe('RegisterScreen', () => {
     fireEvent(password!, 'submitEditing');
 
     await waitFor(() => expect(mockRegister).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores a deferred registration result after the screen unmounts', async () => {
+    const pending = deferred<void>();
+    mockRegister.mockReturnValue(pending.promise);
+    const view = renderWithProviders(<RegisterScreen />);
+
+    fireEvent.changeText(view.getByLabelText('邮箱'), 'new@example.com');
+    fireEvent.changeText(view.getByLabelText('密码'), 'password123');
+    fireEvent.press(view.getByRole('button', { name: '注册并开始' }));
+    view.unmount();
+
+    await act(async () => {
+      pending.resolve();
+      await pending.promise;
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 });

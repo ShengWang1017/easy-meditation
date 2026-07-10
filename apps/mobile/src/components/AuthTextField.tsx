@@ -46,7 +46,6 @@ export const AuthTextField = forwardRef<TextInput, AuthTextFieldProps>(
           accessibilityLabel={label}
           accessibilityLabelledBy={labelID}
           allowFontScaling
-          maxFontSizeMultiplier={1.2}
           placeholderTextColor={placeholderTextColor}
           ref={ref}
           selectionColor={colors.teal}
@@ -81,11 +80,10 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: fontFamilies.system,
     fontSize: 16,
-    height: 56,
     lineHeight: 22,
     minHeight: 56,
     paddingHorizontal: spacing.md,
-    paddingVertical: 0
+    paddingVertical: 14
   },
   inputError: {
     borderColor: colors.danger
