@@ -17,6 +17,12 @@ export function PreferencesStoreProvider({
   store,
   children
 }: PreferencesStoreProviderProps) {
+  if (!store.persist.hasHydrated()) {
+    throw new Error(
+      'PreferencesStoreProvider requires an already hydrated preferences store'
+    );
+  }
+
   return (
     <PreferencesStoreContext.Provider value={store}>
       {children}

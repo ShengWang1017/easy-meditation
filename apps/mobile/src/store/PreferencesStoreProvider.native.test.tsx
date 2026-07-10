@@ -74,6 +74,21 @@ function PreferencesProbe() {
 }
 
 describe('PreferencesStoreProvider', () => {
+  it('rejects an unhydrated store with a provider-specific error', () => {
+    const store = createUserPreferencesStore('unhydrated-user', createMemoryStorage());
+
+    expect(store.persist.hasHydrated()).toBe(false);
+    expect(() =>
+      render(
+        <PreferencesStoreProvider store={store}>
+          <PreferencesProbe />
+        </PreferencesStoreProvider>
+      )
+    ).toThrow(
+      'PreferencesStoreProvider requires an already hydrated preferences store'
+    );
+  });
+
   it('accepts an already hydrated store and selector subscriptions update', async () => {
     const store = createUserPreferencesStore('provider-user', createMemoryStorage());
     await hydrateUserPreferencesStore(store);
