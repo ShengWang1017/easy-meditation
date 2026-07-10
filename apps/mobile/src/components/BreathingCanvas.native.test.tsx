@@ -3,6 +3,7 @@ import { render } from '@testing-library/react-native';
 import {
   BREATH_LAYER_ORDER,
   BREATH_RENDER_SPEC,
+  BREATH_TEST_IDS,
   BreathingCanvas,
   createOrganicBlobPath,
   resolveBreathingCanvasFrame
@@ -14,6 +15,11 @@ const phases: BreathingPhase[] = [
   { kind: 'exhale', label: '呼气', durationSeconds: 4 },
   { kind: 'hold', label: '屏息', durationSeconds: 4 }
 ];
+
+type RenderedHostNode = {
+  type: unknown;
+  props: Record<string, any>;
+};
 
 describe('BreathingCanvas renderer contract', () => {
   it('keeps the exact Web layer order and drawing constants', () => {
@@ -241,6 +247,93 @@ describe('BreathingCanvas renderer contract', () => {
     expect(resolveBreathingCanvasFrame(pausedProps, 250)).toEqual(
       resolveBreathingCanvasFrame(pausedProps, 3_250)
     );
+  });
+
+  it('keeps paused complete-kind input frozen until status becomes completed', () => {
+    const pausedCompleteProps = {
+      phases,
+      phaseIndex: 3,
+      phaseKind: 'complete' as const,
+      phaseProgress: 1,
+      phaseDurationMs: 4_000,
+      status: 'paused' as const,
+      reducedMotion: false
+    };
+
+    const early = resolveBreathingCanvasFrame(pausedCompleteProps, 250);
+    const late = resolveBreathingCanvasFrame(pausedCompleteProps, 3_250);
+    expect(early).toEqual(late);
+    expect(early).toMatchObject({ kind: 'complete', progress: 1 });
+  });
+
+  it('binds layer order, gradients, and all particles to the rendered Skia tree', () => {
+    const canvas = render(
+      <BreathingCanvas
+        phases={phases}
+        phaseIndex={0}
+        phaseKind="inhale"
+        phaseProgress={0.25}
+        phaseDurationMs={4_000}
+        status="running"
+        reducedMotion={false}
+        fixtureVisualTimeMs={0}
+      />
+    );
+    const hostNodes = canvas.UNSAFE_root.findAll(
+      (node: RenderedHostNode) =>
+        typeof node.type === 'string' && typeof node.props.testID === 'string'
+    ) as RenderedHostNode[];
+    const layerIds = hostNodes
+      .map((node) => node.props.testID as string)
+      .filter((testID) => testID.startsWith('breath-layer-'));
+
+    expect(layerIds).toEqual(BREATH_LAYER_ORDER.map((layer) => BREATH_TEST_IDS.layers[layer]));
+
+    const getHostNode = (testID: string) => {
+      const matches = hostNodes.filter((node) => node.props.testID === testID);
+      expect(matches).toHaveLength(1);
+      return matches[0]!;
+    };
+    expect(getHostNode(BREATH_TEST_IDS.gradients.glow).props).toMatchObject({
+      colors: [...BREATH_RENDER_SPEC.glow.colors],
+      positions: [...BREATH_RENDER_SPEC.glow.positions]
+    });
+    expect(getHostNode(BREATH_TEST_IDS.gradients.veil).props).toMatchObject({
+      colors: [...BREATH_RENDER_SPEC.veil.colors],
+      positions: [...BREATH_RENDER_SPEC.veil.positions]
+    });
+    expect(getHostNode(BREATH_TEST_IDS.gradients.core).props).toMatchObject({
+      colors: [...BREATH_RENDER_SPEC.core.colors],
+      positions: [...BREATH_RENDER_SPEC.core.positions]
+    });
+
+    const particles = hostNodes.filter(
+      (node) =>
+        node.type === 'skCircle' &&
+        (node.props.testID as string).startsWith(BREATH_TEST_IDS.particlePrefix)
+    );
+    expect(particles).toHaveLength(42);
+    expect(particles.map((node) => node.props.testID)).toEqual(
+      Array.from(
+        { length: 42 },
+        (_, index) => `${BREATH_TEST_IDS.particlePrefix}${index}`
+      )
+    );
+
+    const particleGradients = hostNodes.filter(
+      (node) =>
+        node.type === 'skRadialGradient' &&
+        (node.props.testID as string).startsWith(BREATH_TEST_IDS.particleGradientPrefix)
+    );
+    expect(particleGradients).toHaveLength(42);
+    for (const gradient of particleGradients) {
+      expect(gradient.props.positions).toEqual([0, 1]);
+      expect(gradient.props.colors[1]).toBe('rgba(255, 255, 255, 0)');
+    }
+    expect(particleGradients[0]?.props.colors).toEqual([
+      'rgba(255, 255, 255, 0.027)',
+      'rgba(255, 255, 255, 0)'
+    ]);
   });
 
   it('renders a decorative CanvasKit-backed native canvas', () => {

@@ -14,6 +14,7 @@ import {
 } from '@shopify/react-native-skia';
 import type { SkPath } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useRef } from 'react';
+import type { ComponentProps, ComponentType } from 'react';
 import { useWindowDimensions } from 'react-native';
 import {
   Easing,
@@ -66,6 +67,42 @@ export const BREATH_LAYER_ORDER = [
   'center-core',
   'center-ring'
 ] as const;
+
+export const BREATH_TEST_IDS = {
+  canvas: 'breathing-canvas',
+  layers: {
+    glow: 'breath-layer-glow',
+    halo: 'breath-layer-halo',
+    veil: 'breath-layer-veil',
+    core: 'breath-layer-core',
+    highlight: 'breath-layer-highlight',
+    texture: 'breath-layer-texture',
+    'center-core': 'breath-layer-center-core',
+    'center-ring': 'breath-layer-center-ring'
+  },
+  gradients: {
+    glow: 'breath-gradient-glow',
+    veil: 'breath-gradient-veil',
+    core: 'breath-gradient-core'
+  },
+  particlePrefix: 'breath-particle-',
+  particleGradientPrefix: 'breath-particle-gradient-'
+} as const;
+
+type WithTestID<T> = T & { testID?: string };
+
+const TestableCircle = Circle as ComponentType<WithTestID<ComponentProps<typeof Circle>>>;
+const TestableGroup = Group as ComponentType<WithTestID<ComponentProps<typeof Group>>>;
+const TestableLinearGradient = LinearGradient as ComponentType<
+  WithTestID<ComponentProps<typeof LinearGradient>>
+>;
+const TestablePath = Path as ComponentType<WithTestID<ComponentProps<typeof Path>>>;
+const TestableRadialGradient = RadialGradient as ComponentType<
+  WithTestID<ComponentProps<typeof RadialGradient>>
+>;
+const TestableTwoPointConicalGradient = TwoPointConicalGradient as ComponentType<
+  WithTestID<ComponentProps<typeof TwoPointConicalGradient>>
+>;
 
 export const BREATH_RENDER_SPEC = {
   canvasSize: 640,
@@ -195,8 +232,8 @@ export function resolveBreathingCanvasFrame(
 ): BreathingCanvasFrame {
   'worklet';
   const isReady = props.status === 'idle';
-  const isComplete = props.status === 'completed' || props.phaseKind === 'complete';
-  const kind = isComplete
+  const isCompletedStatus = props.status === 'completed';
+  const kind = isCompletedStatus
     ? 'complete'
     : isReady
       ? 'ready'
@@ -205,7 +242,7 @@ export function resolveBreathingCanvasFrame(
 
   if (isReady) {
     progress = loopProgress(visualTimeMs, BREATH_RENDER_SPEC.readyDurationMs);
-  } else if (isComplete) {
+  } else if (isCompletedStatus) {
     progress = loopProgress(visualTimeMs, Math.max(1_000, props.phaseDurationMs));
   }
 
@@ -257,7 +294,7 @@ function easeOutCubic(value: number): number {
 }
 
 function resolveKind(props: BreathingCanvasProps): BreathVisualKind {
-  if (props.status === 'completed' || props.phaseKind === 'complete') return 'complete';
+  if (props.status === 'completed') return 'complete';
   if (props.status === 'idle') return 'ready';
   return resolveBreathVisualKind(props.phases, props.phaseIndex, props.phaseKind);
 }
@@ -457,15 +494,22 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
 
   return (
     <Canvas
-      testID="breathing-canvas"
+      testID={BREATH_TEST_IDS.canvas}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={{ width: canvasSize, height: canvasSize, opacity: 0.96 }}
     >
       <Group transform={[{ scale: coordinateScale }]}>
         <Group transform={rootTransform}>
-          <Circle cx={0} cy={0} r={glowCircleRadius} opacity={glowOpacity}>
-            <TwoPointConicalGradient
+          <TestableCircle
+            testID={BREATH_TEST_IDS.layers.glow}
+            cx={0}
+            cy={0}
+            r={glowCircleRadius}
+            opacity={glowOpacity}
+          >
+            <TestableTwoPointConicalGradient
+              testID={BREATH_TEST_IDS.gradients.glow}
               start={vec(0, 0)}
               startR={glowInnerRadius}
               end={vec(0, 0)}
@@ -474,27 +518,38 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
               positions={[...BREATH_RENDER_SPEC.glow.positions]}
             />
             <BlurMask blur={BREATH_RENDER_SPEC.glow.blur} style="normal" respectCTM={false} />
-          </Circle>
+          </TestableCircle>
 
-          <Path
+          <TestablePath
+            testID={BREATH_TEST_IDS.layers.halo}
             path={haloPath}
             color={BREATH_RENDER_SPEC.halo.color}
             opacity={haloOpacity}
           />
 
-          <Group transform={veilTransform} opacity={veilOpacity}>
+          <TestableGroup
+            testID={BREATH_TEST_IDS.layers.veil}
+            transform={veilTransform}
+            opacity={veilOpacity}
+          >
             <Path path={veilPath}>
-              <LinearGradient
+              <TestableLinearGradient
+                testID={BREATH_TEST_IDS.gradients.veil}
                 start={veilGradientStart}
                 end={veilGradientEnd}
                 colors={[...BREATH_RENDER_SPEC.veil.colors]}
                 positions={[...BREATH_RENDER_SPEC.veil.positions]}
               />
             </Path>
-          </Group>
+          </TestableGroup>
 
-          <Path path={corePath} opacity={coreOpacity}>
-            <TwoPointConicalGradient
+          <TestablePath
+            testID={BREATH_TEST_IDS.layers.core}
+            path={corePath}
+            opacity={coreOpacity}
+          >
+            <TestableTwoPointConicalGradient
+              testID={BREATH_TEST_IDS.gradients.core}
               start={coreGradientStart}
               startR={coreGradientStartRadius}
               end={vec(0, 0)}
@@ -502,34 +557,41 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
               colors={[...BREATH_RENDER_SPEC.core.colors]}
               positions={[...BREATH_RENDER_SPEC.core.positions]}
             />
-          </Path>
+          </TestablePath>
 
-          <Path
+          <TestablePath
+            testID={BREATH_TEST_IDS.layers.highlight}
             path={highlightPath}
             color={BREATH_RENDER_SPEC.highlight.color}
             opacity={BREATH_RENDER_SPEC.highlight.alpha}
           />
 
-          <Group blendMode={BREATH_RENDER_SPEC.texture.blendMode}>
+          <TestableGroup
+            testID={BREATH_TEST_IDS.layers.texture}
+            blendMode={BREATH_RENDER_SPEC.texture.blendMode}
+          >
             {BREATH_TEXTURE.map((particle, index) => (
               <BreathParticle
                 key={index}
+                index={index}
                 particle={particle}
                 radius={radius}
                 motion={motion}
                 timeSeconds={timeSeconds}
               />
             ))}
-          </Group>
+          </TestableGroup>
 
-          <Circle
+          <TestableCircle
+            testID={BREATH_TEST_IDS.layers['center-core']}
             cx={0}
             cy={0}
             r={centerRadius}
             color={BREATH_RENDER_SPEC.center.color}
             opacity={centerOpacity}
           />
-          <Circle
+          <TestableCircle
+            testID={BREATH_TEST_IDS.layers['center-ring']}
             cx={0}
             cy={0}
             r={centerRingRadius}
@@ -543,13 +605,14 @@ export function BreathingCanvas(props: BreathingCanvasProps) {
 }
 
 type BreathParticleProps = {
+  index: number;
   particle: BreathTextureParticle;
   radius: SharedValue<number>;
   motion: SharedValue<BreathMotion>;
   timeSeconds: SharedValue<number>;
 };
 
-function BreathParticle({ particle, radius, motion, timeSeconds }: BreathParticleProps) {
+function BreathParticle({ index, particle, radius, motion, timeSeconds }: BreathParticleProps) {
   const center = useDerivedValue(() => {
     const driftAngle =
       particle.angle +
@@ -577,13 +640,14 @@ function BreathParticle({ particle, radius, motion, timeSeconds }: BreathParticl
   const centerColor = `rgba(255, 255, 255, ${particle.alpha * BREATH_RENDER_SPEC.texture.alphaScale})`;
 
   return (
-    <Circle c={center} r={size}>
-      <RadialGradient
+    <TestableCircle testID={`${BREATH_TEST_IDS.particlePrefix}${index}`} c={center} r={size}>
+      <TestableRadialGradient
+        testID={`${BREATH_TEST_IDS.particleGradientPrefix}${index}`}
         c={center}
         r={size}
         colors={[centerColor, 'rgba(255, 255, 255, 0)']}
         positions={[0, 1]}
       />
-    </Circle>
+    </TestableCircle>
   );
 }
