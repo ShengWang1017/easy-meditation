@@ -6,11 +6,6 @@
     "moduleResolution": "Bundler",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "paths": {
-      "@easy-meditation/shared": [
-        "../../packages/shared/src/index.ts"
-      ]
-    },
     "types": [
       "react",
       "react-native",
@@ -19,7 +14,6 @@
   },
   "include": [
     "app",
-    "src",
-    "expo-env.d.ts"
+    "src"
   ]
 }
