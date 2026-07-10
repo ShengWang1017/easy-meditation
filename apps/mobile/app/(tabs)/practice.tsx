@@ -1,9 +1,58 @@
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { ImageSourcePropType } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { BreathingMethod } from '@easy-meditation/shared';
 import { fetchBreathingMethods } from '../../src/api/methods';
 import { Screen } from '../../src/components/Screen';
-import { colors, spacing } from '../../src/theme/tokens';
+import { colors, methodTint, radii, shadowSoft, spacing, type } from '../../src/theme/tokens';
+
+const PETALS: Record<string, ImageSourcePropType> = {
+  box: require('../../assets/reference-style/petal-box.png'),
+  'four-seven-eight': require('../../assets/reference-style/petal-sleep.png'),
+  coherent: require('../../assets/reference-style/petal-focus.png')
+};
+const DANDELION = require('../../assets/reference-style/dandelion-card.png') as ImageSourcePropType;
+
+function rhythmDigits(method: BreathingMethod): string {
+  return method.phases.map((phase) => phase.durationSeconds).join('-');
+}
+
+function MethodCard({ method }: { method: BreathingMethod }) {
+  const tint = methodTint(method.id);
+  const petal = PETALS[method.id];
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={() =>
+        router.push({ pathname: '/session/[methodId]', params: { methodId: method.id } })
+      }
+      style={({ pressed }) => [
+        styles.card,
+        { backgroundColor: tint.bg, borderColor: tint.border },
+        pressed ? styles.cardPressed : null
+      ]}
+    >
+      {petal ? (
+        <Image source={petal} style={styles.petal} resizeMode="contain" />
+      ) : null}
+      <View style={styles.cardTop}>
+        <Text style={styles.cardTitle}>{method.title}</Text>
+        <Text style={styles.cardRhythm}>{rhythmDigits(method)}</Text>
+      </View>
+      <View style={styles.cardFooter}>
+        {tint.mood ? (
+          <View style={styles.moodPill}>
+            <Text style={styles.moodText}>{tint.mood}</Text>
+          </View>
+        ) : (
+          <View />
+        )}
+        <Text style={styles.duration}>{Math.round(method.defaultDurationSeconds / 60)} 分钟</Text>
+      </View>
+    </Pressable>
+  );
+}
 
 export default function PracticeScreen() {
   const methodsQuery = useQuery({
@@ -53,7 +102,7 @@ export default function PracticeScreen() {
   }
 
   return (
-    <Screen>
+    <Screen scrollable>
       <View style={styles.header}>
         <Text style={styles.kicker}>今日练习</Text>
         <Text style={styles.title}>选择一种呼吸节奏</Text>
@@ -80,24 +129,16 @@ export default function PracticeScreen() {
 
       <View style={styles.grid}>
         {methods.map((method) => (
-          <Pressable
-            key={method.id}
-            accessibilityRole="button"
-            onPress={() =>
-              router.push({
-                pathname: '/session/[methodId]',
-                params: { methodId: method.id }
-              })
-            }
-            style={({ pressed }) => [styles.card, pressed ? styles.buttonPressed : null]}
-          >
-            <Text style={styles.cardTitle}>{method.title}</Text>
-            <Text style={styles.cardSubtitle}>{method.subtitle}</Text>
-            <Text style={styles.duration}>
-              默认 {Math.round(method.defaultDurationSeconds / 60)} 分钟
-            </Text>
-          </Pressable>
+          <MethodCard key={method.id} method={method} />
         ))}
+      </View>
+
+      <View style={styles.beforeCard}>
+        <View style={styles.beforeCopy}>
+          <Text style={styles.beforeTitle}>在您开始前</Text>
+          <Text style={styles.beforeText}>了解每项呼吸训练的原理，几次呼吸就能回到平静。</Text>
+        </View>
+        <Image source={DANDELION} style={styles.beforeImage} resizeMode="contain" />
       </View>
     </Screen>
   );
@@ -105,31 +146,114 @@ export default function PracticeScreen() {
 
 const styles = StyleSheet.create({
   header: {
-    gap: spacing.md
+    gap: spacing.sm
   },
   kicker: {
-    color: colors.accentStrong,
-    fontSize: 14,
-    fontWeight: '600'
+    ...type.label,
+    color: colors.accentStrong
   },
   title: {
-    color: colors.ink,
-    fontSize: 36,
-    fontWeight: '700'
+    ...type.hero,
+    color: colors.ink
   },
   description: {
-    color: colors.muted,
-    fontSize: 16,
-    lineHeight: 24
+    ...type.body,
+    color: colors.muted
   },
   grid: {
     marginTop: spacing.xl,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
     gap: spacing.md
+  },
+  card: {
+    width: '47.5%',
+    minHeight: 172,
+    justifyContent: 'space-between',
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    overflow: 'hidden',
+    ...shadowSoft
+  },
+  cardPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.985 }]
+  },
+  petal: {
+    position: 'absolute',
+    right: -18,
+    bottom: -14,
+    width: 128,
+    height: 128,
+    opacity: 0.55
+  },
+  cardTop: {
+    gap: spacing.xs
+  },
+  cardTitle: {
+    ...type.cardTitle,
+    color: colors.ink
+  },
+  cardRhythm: {
+    ...type.meta,
+    color: colors.accentStrong,
+    letterSpacing: 1
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  moodPill: {
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)'
+  },
+  moodText: {
+    ...type.meta,
+    color: colors.accent
+  },
+  duration: {
+    ...type.label,
+    color: colors.accentStrong
+  },
+  beforeCard: {
+    marginTop: spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    ...shadowSoft
+  },
+  beforeCopy: {
+    flex: 1,
+    gap: spacing.xs
+  },
+  beforeTitle: {
+    ...type.section,
+    color: colors.ink
+  },
+  beforeText: {
+    ...type.meta,
+    color: colors.muted,
+    lineHeight: 20
+  },
+  beforeImage: {
+    width: 72,
+    height: 72,
+    borderRadius: radii.md
   },
   warning: {
     marginTop: spacing.xl,
     gap: spacing.md,
-    borderRadius: 20,
+    borderRadius: radii.md,
     padding: spacing.lg,
     backgroundColor: 'rgba(188, 126, 72, 0.12)',
     borderWidth: 1,
@@ -139,52 +263,25 @@ const styles = StyleSheet.create({
     gap: spacing.xs
   },
   warningTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '700'
+    ...type.label,
+    color: colors.ink
   },
   warningText: {
-    color: colors.muted,
-    fontSize: 14,
-    lineHeight: 20
+    ...type.meta,
+    color: colors.muted
   },
   warningButton: {
     alignSelf: 'flex-start',
     minHeight: 40,
-    borderRadius: 14,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
     backgroundColor: colors.surfaceStrong
   },
   warningButtonText: {
-    color: colors.surface,
-    fontSize: 14,
-    fontWeight: '700'
-  },
-  card: {
-    minHeight: 140,
-    justifyContent: 'space-between',
-    borderRadius: 24,
-    padding: spacing.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)'
-  },
-  cardTitle: {
-    color: colors.ink,
-    fontSize: 24,
-    fontWeight: '700'
-  },
-  cardSubtitle: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22
-  },
-  duration: {
-    color: colors.accentStrong,
-    fontSize: 15,
-    fontWeight: '700'
+    ...type.label,
+    color: colors.accentStrong
   },
   state: {
     flex: 1,
@@ -193,21 +290,21 @@ const styles = StyleSheet.create({
     gap: spacing.md
   },
   stateText: {
-    color: colors.muted,
-    fontSize: 15
+    ...type.body,
+    color: colors.muted
   },
   retryButton: {
     minHeight: 48,
-    borderRadius: 16,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.accentStrong
   },
   retryButtonText: {
-    color: colors.surfaceStrong,
-    fontSize: 16,
-    fontWeight: '700'
+    ...type.body,
+    fontWeight: '700',
+    color: colors.surfaceStrong
   },
   buttonPressed: {
     opacity: 0.86

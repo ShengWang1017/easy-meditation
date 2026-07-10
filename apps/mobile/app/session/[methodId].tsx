@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
+import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { secondsToTimerLabel } from '@easy-meditation/shared';
 import { fetchBreathingMethods } from '../../src/api/methods';
@@ -9,10 +10,29 @@ import {
   buildCompletedPracticeSessionInput,
   createPracticeSession
 } from '../../src/api/sessions';
+import { BreathingOrb } from '../../src/components/BreathingOrb';
 import { Screen } from '../../src/components/Screen';
 import type { SessionClockSnapshot } from '../../src/domain/sessionClock';
 import { createSessionClock } from '../../src/domain/sessionClock';
-import { colors, spacing } from '../../src/theme/tokens';
+import { colors, methodTint, radii, spacing } from '../../src/theme/tokens';
+
+function orbScaleFor(snapshot: SessionClockSnapshot): number {
+  if (snapshot.status !== 'running') {
+    return 0.82;
+  }
+
+  const progress = Math.max(0, Math.min(1, snapshot.phase.phaseProgress));
+  switch (snapshot.phase.kind) {
+    case 'inhale':
+      return 0.72 + 0.3 * progress;
+    case 'exhale':
+      return 1.02 - 0.3 * progress;
+    case 'hold':
+      return 1.02;
+    default:
+      return 0.85;
+  }
+}
 
 export default function SessionScreen() {
   const { methodId } = useLocalSearchParams<{ methodId: string }>();
@@ -158,6 +178,16 @@ export default function SessionScreen() {
   return (
     <Screen>
       <View style={styles.content}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="返回"
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.backButton}
+        >
+          <Ionicons name="chevron-back" size={26} color={colors.ink} />
+        </Pressable>
+
         <View style={styles.header}>
           <Text style={styles.methodTitle}>{method.title}</Text>
           <Text style={styles.methodSubtitle}>{method.subtitle}</Text>
@@ -166,7 +196,11 @@ export default function SessionScreen() {
         <View style={styles.timerPanel}>
           <Text style={styles.phaseLabel}>{activeSnapshot.phase.label}</Text>
           <Text style={styles.phaseCountdown}>{activeSnapshot.phase.remainingInPhase} 秒</Text>
-          <View style={styles.orb} />
+          <BreathingOrb
+            scaleTarget={orbScaleFor(activeSnapshot)}
+            active={activeSnapshot.status === 'running'}
+            glow={methodTint(method.id).glow}
+          />
           <Text style={styles.totalTimer}>
             {secondsToTimerLabel(activeSnapshot.remainingSeconds)}
           </Text>
@@ -286,13 +320,17 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 20
   },
-  orb: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: colors.lilac,
-    borderWidth: 10,
-    borderColor: 'rgba(255, 255, 255, 0.45)'
+  backButton: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)'
   },
   totalTimer: {
     color: colors.ink,

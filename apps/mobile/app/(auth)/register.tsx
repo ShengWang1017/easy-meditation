@@ -3,7 +3,7 @@ import { Link, router } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Screen } from '../../src/components/Screen';
 import { useAuthStore } from '../../src/store/authStore';
-import { colors, spacing } from '../../src/theme/tokens';
+import { colors, radii, shadowSoft, spacing } from '../../src/theme/tokens';
 
 export default function RegisterScreen() {
   const register = useAuthStore((state) => state.register);
@@ -130,10 +130,13 @@ const styles = StyleSheet.create({
   },
   input: {
     minHeight: 56,
-    borderRadius: 18,
+    borderRadius: radii.md,
     backgroundColor: colors.surfaceStrong,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
     paddingHorizontal: spacing.md,
-    color: colors.ink
+    color: colors.ink,
+    ...shadowSoft
   },
   error: {
     color: colors.danger,

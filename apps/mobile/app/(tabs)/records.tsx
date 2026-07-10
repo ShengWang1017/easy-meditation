@@ -2,8 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { secondsToTimerLabel } from '@easy-meditation/shared';
 import { fetchStatsSummary } from '../../src/api/stats';
+import { Heatmap } from '../../src/components/Heatmap';
 import { Screen } from '../../src/components/Screen';
-import { colors, spacing } from '../../src/theme/tokens';
+import { colors, radii, shadowSoft, spacing, type } from '../../src/theme/tokens';
 
 function formatMinutes(seconds: number) {
   return Math.round(seconds / 60);
@@ -45,12 +46,23 @@ export default function RecordsScreen() {
     );
   }
 
+  const recentSessions = stats?.recentSessions ?? [];
+
   return (
     <Screen scrollable>
-      <View style={styles.header}>
-        <Text style={styles.kicker}>服务端统计</Text>
-        <Text style={styles.title}>练习记录</Text>
-        <Text style={styles.description}>这里展示后端汇总的连续天数、时长和最近完成的练习。</Text>
+      <Text style={styles.kicker}>练习记录</Text>
+
+      <View style={styles.hero}>
+        <View style={styles.heroCopy}>
+          <Text style={styles.heroTitle}>轻轻记住坚持</Text>
+          <Text style={styles.heroSubtitle}>每一次呼吸，都会留下痕迹。</Text>
+        </View>
+        <View style={styles.heroStat}>
+          <Text style={styles.heroStatValue}>
+            {secondsToTimerLabel(stats?.totalPracticeSeconds ?? 0)}
+          </Text>
+          <Text style={styles.heroStatLabel}>累计时长</Text>
+        </View>
       </View>
 
       {statsQuery.isError ? (
@@ -69,28 +81,34 @@ export default function RecordsScreen() {
         </View>
       ) : null}
 
-      <View style={styles.grid}>
-        <StatCard label="连续天数" value={`${stats?.currentStreak ?? 0}`} />
-        <StatCard label="本周分钟" value={`${formatMinutes(stats?.weeklyPracticeSeconds ?? 0)}`} />
-        <StatCard label="完成次数" value={`${stats?.totalSessions ?? 0}`} />
-        <StatCard label="累计时长" value={secondsToTimerLabel(stats?.totalPracticeSeconds ?? 0)} />
+      <View style={styles.statRow}>
+        <StatTile label="连续天数" value={`${stats?.currentStreak ?? 0}`} />
+        <StatTile label="本周分钟" value={`${formatMinutes(stats?.weeklyPracticeSeconds ?? 0)}`} />
+        <StatTile label="完成次数" value={`${stats?.totalSessions ?? 0}`} />
+      </View>
+
+      <View style={styles.block}>
+        <Heatmap sessions={recentSessions} />
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>最近练习</Text>
-        {stats?.recentSessions.length ? (
+        {recentSessions.length ? (
           <View style={styles.list}>
-            {stats.recentSessions.map((session) => (
+            {recentSessions.map((session) => (
               <View key={session.id} style={styles.row}>
+                <View style={styles.recordMark} />
                 <View style={styles.rowCopy}>
                   <Text style={styles.rowTitle}>{session.methodTitleSnapshot}</Text>
                   <Text style={styles.rowMeta}>
                     练习 {secondsToTimerLabel(session.actualDurationSeconds)}
                   </Text>
                 </View>
-                <Text style={styles.rowBadge}>
-                  {formatMinutes(session.actualDurationSeconds)} 分钟
-                </Text>
+                <View style={styles.minutePill}>
+                  <Text style={styles.minutePillText}>
+                    {formatMinutes(session.actualDurationSeconds)} 分钟
+                  </Text>
+                </View>
               </View>
             ))}
           </View>
@@ -105,122 +123,176 @@ export default function RecordsScreen() {
   );
 }
 
-type StatCardProps = {
+type StatTileProps = {
   label: string;
   value: string;
 };
 
-function StatCard({ label, value }: StatCardProps) {
+function StatTile({ label, value }: StatTileProps) {
   return (
-    <View style={styles.card}>
-      <Text style={styles.cardValue}>{value}</Text>
-      <Text style={styles.cardLabel}>{label}</Text>
+    <View style={styles.tile}>
+      <Text style={styles.tileValue}>{value}</Text>
+      <Text style={styles.tileLabel}>{label}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    gap: spacing.md
-  },
   kicker: {
+    ...type.label,
     color: colors.accentStrong,
-    fontSize: 14,
-    fontWeight: '600'
+    marginBottom: spacing.md
   },
-  title: {
-    color: colors.ink,
-    fontSize: 32,
-    fontWeight: '700'
-  },
-  description: {
-    color: colors.muted,
-    fontSize: 16,
-    lineHeight: 24
-  },
-  grid: {
-    marginTop: spacing.xl,
+  hero: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md
-  },
-  card: {
-    width: '47%',
-    minHeight: 112,
-    justifyContent: 'space-between',
-    borderRadius: 24,
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radii.xl,
     padding: spacing.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)'
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    ...shadowSoft
   },
-  cardValue: {
-    color: colors.accentStrong,
-    fontSize: 28,
-    fontWeight: '800'
+  heroCopy: {
+    flex: 1,
+    gap: spacing.xs
   },
-  cardLabel: {
-    color: colors.muted,
-    fontSize: 14
+  heroTitle: {
+    ...type.title,
+    color: colors.ink
+  },
+  heroSubtitle: {
+    ...type.meta,
+    color: colors.muted
+  },
+  heroStat: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.mint
+  },
+  heroStatValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.accentStrong
+  },
+  heroStatLabel: {
+    ...type.meta,
+    color: colors.accent
+  },
+  statRow: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    gap: spacing.sm
+  },
+  tile: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    ...shadowSoft
+  },
+  tileValue: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: colors.accentStrong
+  },
+  tileLabel: {
+    ...type.meta,
+    color: colors.muted
+  },
+  block: {
+    marginTop: spacing.md
   },
   section: {
     marginTop: spacing.xl,
     gap: spacing.md
   },
   sectionTitle: {
-    color: colors.ink,
-    fontSize: 20,
-    fontWeight: '700'
+    ...type.section,
+    color: colors.ink
   },
   list: {
-    gap: spacing.md
+    gap: spacing.sm
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing.md,
-    borderRadius: 24,
-    padding: spacing.lg,
+    borderRadius: radii.lg,
+    padding: spacing.md,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)'
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    ...shadowSoft
+  },
+  recordMark: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.lilac,
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.7)'
   },
   rowCopy: {
     flex: 1,
-    gap: spacing.xs
+    gap: 2
   },
   rowTitle: {
-    color: colors.ink,
+    ...type.label,
     fontSize: 16,
-    fontWeight: '700'
+    color: colors.ink
   },
   rowMeta: {
-    color: colors.muted,
-    fontSize: 14
+    ...type.meta,
+    color: colors.muted
   },
-  rowBadge: {
-    color: colors.accentStrong,
-    fontSize: 14,
-    fontWeight: '700'
+  minutePill: {
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    backgroundColor: colors.mint
+  },
+  minutePillText: {
+    ...type.meta,
+    fontWeight: '700',
+    color: colors.accentStrong
   },
   emptyState: {
     gap: spacing.sm,
-    borderRadius: 24,
+    borderRadius: radii.lg,
     padding: spacing.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)'
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    ...shadowSoft
   },
   emptyTitle: {
-    color: colors.ink,
+    ...type.label,
     fontSize: 16,
-    fontWeight: '700'
+    color: colors.ink
   },
   emptyText: {
+    ...type.meta,
     color: colors.muted,
-    fontSize: 14,
-    lineHeight: 22
+    lineHeight: 20
+  },
+  title: {
+    ...type.title,
+    color: colors.ink,
+    textAlign: 'center'
+  },
+  description: {
+    ...type.body,
+    color: colors.muted,
+    textAlign: 'center'
   },
   state: {
     flex: 1,
@@ -229,26 +301,26 @@ const styles = StyleSheet.create({
     gap: spacing.md
   },
   stateText: {
-    color: colors.muted,
-    fontSize: 15
+    ...type.body,
+    color: colors.muted
   },
   retryButton: {
     minHeight: 48,
-    borderRadius: 16,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.accentStrong
   },
   retryButtonText: {
-    color: colors.surfaceStrong,
-    fontSize: 16,
-    fontWeight: '700'
+    ...type.body,
+    fontWeight: '700',
+    color: colors.surfaceStrong
   },
   warning: {
-    marginTop: spacing.xl,
+    marginTop: spacing.md,
     gap: spacing.md,
-    borderRadius: 20,
+    borderRadius: radii.md,
     padding: spacing.lg,
     backgroundColor: 'rgba(188, 126, 72, 0.12)',
     borderWidth: 1,
@@ -258,28 +330,25 @@ const styles = StyleSheet.create({
     gap: spacing.xs
   },
   warningTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '700'
+    ...type.label,
+    color: colors.ink
   },
   warningText: {
-    color: colors.muted,
-    fontSize: 14,
-    lineHeight: 20
+    ...type.meta,
+    color: colors.muted
   },
   warningButton: {
     alignSelf: 'flex-start',
     minHeight: 40,
-    borderRadius: 14,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
     backgroundColor: colors.surfaceStrong
   },
   warningButtonText: {
-    color: colors.surface,
-    fontSize: 14,
-    fontWeight: '700'
+    ...type.label,
+    color: colors.accentStrong
   },
   buttonPressed: {
     opacity: 0.86

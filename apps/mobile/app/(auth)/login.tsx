@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, router } from 'expo-router';
 import {
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -9,7 +10,9 @@ import {
 } from 'react-native';
 import { Screen } from '../../src/components/Screen';
 import { useAuthStore } from '../../src/store/authStore';
-import { colors, spacing } from '../../src/theme/tokens';
+import { colors, radii, shadowSoft, spacing } from '../../src/theme/tokens';
+
+const DANDELION = require('../../assets/reference-style/dandelion-card.png');
 
 export default function LoginScreen() {
   const login = useAuthStore((state) => state.login);
@@ -40,6 +43,7 @@ export default function LoginScreen() {
     <Screen scrollable>
       <View style={styles.form}>
         <View style={styles.header}>
+          <Image source={DANDELION} style={styles.logo} resizeMode="contain" />
           <Text style={styles.eyebrow}>Easy Meditation</Text>
           <Text style={styles.title}>欢迎回来</Text>
           <Text style={styles.subtitle}>继续你的今日练习，呼吸会带你回到安静里。</Text>
@@ -95,6 +99,12 @@ const styles = StyleSheet.create({
   header: {
     gap: spacing.sm
   },
+  logo: {
+    width: 72,
+    height: 72,
+    borderRadius: radii.lg,
+    marginBottom: spacing.sm
+  },
   eyebrow: {
     color: colors.accentStrong,
     fontSize: 14,
@@ -120,10 +130,13 @@ const styles = StyleSheet.create({
   },
   input: {
     minHeight: 56,
-    borderRadius: 18,
+    borderRadius: radii.md,
     backgroundColor: colors.surfaceStrong,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
     paddingHorizontal: spacing.md,
-    color: colors.ink
+    color: colors.ink,
+    ...shadowSoft
   },
   error: {
     color: colors.danger,
