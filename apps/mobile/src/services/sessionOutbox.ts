@@ -1,7 +1,8 @@
 import {
   practiceSessionCreateSchema,
   type PracticeSession,
-  type PracticeSessionCreateInput
+  type PracticeSessionCreateInput,
+  type StatsSummary
 } from '@easy-meditation/shared';
 import type { QueryClient } from '@tanstack/react-query';
 
@@ -157,6 +158,7 @@ export function createAuthenticatedSessionOutbox(options: {
 }): SessionOutbox {
   const sessionsKey = userQueryKeys.sessions(options.userId);
   const statsKey = userQueryKeys.stats(options.userId);
+  const now = options.now ?? Date.now;
 
   return createSessionOutbox({
     getLedger: () => options.preferencesStore.getState().localSessionLedger,
@@ -168,6 +170,13 @@ export function createAuthenticatedSessionOutbox(options: {
       options.preferencesStore.getState().removeLedgerEntry(clientSessionId),
     post: createPracticeSession,
     async cacheAndRefreshAccepted(accepted) {
+      const acceptedWasCached =
+        options.queryClient
+          .getQueryData<PracticeSession[]>(sessionsKey)
+          ?.some(
+            (session) =>
+              session.clientSessionId === accepted.clientSessionId
+          ) ?? false;
       await Promise.all([
         options.queryClient.cancelQueries({
           queryKey: sessionsKey,
@@ -187,6 +196,49 @@ export function createAuthenticatedSessionOutbox(options: {
           )
         ]
       );
+      options.queryClient.setQueryData<StatsSummary>(statsKey, (current) => {
+        if (!current) return undefined;
+
+        const alreadyAccounted =
+          acceptedWasCached ||
+          current.recentSessions.some(
+            (session) =>
+              session.clientSessionId === accepted.clientSessionId
+          );
+        const endedAtMs = Date.parse(accepted.endedAt);
+        const nowMs = now();
+        const countsTowardWeekly =
+          Number.isFinite(endedAtMs) &&
+          endedAtMs >= nowMs - 6 * 24 * 60 * 60 * 1_000 &&
+          endedAtMs <= nowMs;
+        const recentSessions = [
+          accepted,
+          ...current.recentSessions.filter(
+            (session) =>
+              session.clientSessionId !== accepted.clientSessionId
+          )
+        ]
+          .sort(
+            (left, right) =>
+              Date.parse(right.endedAt) - Date.parse(left.endedAt)
+          )
+          .slice(0, 10);
+
+        return {
+          ...current,
+          totalSessions:
+            current.totalSessions + (alreadyAccounted ? 0 : 1),
+          totalPracticeSeconds:
+            current.totalPracticeSeconds +
+            (alreadyAccounted ? 0 : accepted.actualDurationSeconds),
+          weeklyPracticeSeconds:
+            current.weeklyPracticeSeconds +
+            (!alreadyAccounted && countsTowardWeekly
+              ? accepted.actualDurationSeconds
+              : 0),
+          recentSessions
+        };
+      });
       await Promise.all([
         options.queryClient.fetchQuery({
           queryKey: sessionsKey,
@@ -201,6 +253,6 @@ export function createAuthenticatedSessionOutbox(options: {
       ]);
     },
     onTerminalUnauthorized: options.onTerminalUnauthorized,
-    now: options.now ?? Date.now
+    now
   });
 }

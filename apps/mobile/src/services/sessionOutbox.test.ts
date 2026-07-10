@@ -520,7 +520,10 @@ describe('authenticated session outbox adapter', () => {
     });
     queryClient.setQueryData(userQueryKeys.stats('user-a'), {
       totalSessions: 0,
-      totalPracticeSeconds: 0
+      totalPracticeSeconds: 0,
+      weeklyPracticeSeconds: 0,
+      currentStreak: 0,
+      recentSessions: []
     });
     const sessionsGate = deferred<PracticeSession[]>();
     const statsGate = deferred<StatsSummary>();
@@ -725,5 +728,74 @@ describe('authenticated session outbox adapter', () => {
     });
     expect(updateLedgerEntry).toHaveBeenCalledTimes(1);
     expect(removeLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  it('idempotently accounts for an accepted session when only the stats refresh fails', async () => {
+    const entry = pendingEntry();
+    const accepted = acceptedSession();
+    let ledger: LocalSessionLedgerEntry[] = [entry];
+    const updateLedgerEntry = vi.fn(
+      async (
+        clientSessionId: string,
+        updater: (row: LocalSessionLedgerEntry) => LocalSessionLedgerEntry
+      ) => {
+        ledger = ledger.map((row) =>
+          row.clientSessionId === clientSessionId ? updater(row) : row
+        );
+      }
+    );
+    const store = {
+      getState: () => ({
+        localSessionLedger: ledger,
+        updateLedgerEntry,
+        removeLedgerEntry: vi.fn()
+      })
+    } as unknown as UserPreferencesStore;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    const initialStats: StatsSummary = {
+      totalSessions: 5,
+      totalPracticeSeconds: 500,
+      weeklyPracticeSeconds: 100,
+      currentStreak: 2,
+      recentSessions: []
+    };
+    queryClient.setQueryData(userQueryKeys.stats('user-a'), initialStats);
+    apiMocks.createPracticeSession.mockResolvedValue(accepted);
+    apiMocks.fetchPracticeSessions.mockResolvedValue([accepted]);
+    apiMocks.fetchStatsSummary.mockRejectedValue(new Error('stats offline'));
+    const outbox = createAuthenticatedSessionOutbox({
+      userId: 'user-a',
+      preferencesStore: store,
+      queryClient,
+      onTerminalUnauthorized: async () => undefined,
+      now: () => NOW_MS
+    });
+
+    await outbox.submit(entry.clientSessionId);
+
+    expect(queryClient.getQueryData(userQueryKeys.stats('user-a'))).toEqual({
+      totalSessions: 6,
+      totalPracticeSeconds: 798,
+      weeklyPracticeSeconds: 398,
+      currentStreak: 2,
+      recentSessions: [accepted]
+    });
+    expect(ledger[0]).toMatchObject({
+      state: 'pending',
+      nextAttemptAt: new Date(NOW_MS + 5_000).toISOString(),
+      lastErrorCode: 'CACHE_REFRESH_FAILED'
+    });
+
+    await outbox.submit(entry.clientSessionId);
+
+    expect(queryClient.getQueryData(userQueryKeys.stats('user-a'))).toEqual({
+      totalSessions: 6,
+      totalPracticeSeconds: 798,
+      weeklyPracticeSeconds: 398,
+      currentStreak: 2,
+      recentSessions: [accepted]
+    });
   });
 });
