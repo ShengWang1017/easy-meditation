@@ -71,13 +71,15 @@ export function useSessionAudio({
       const key =
         kind === 'complete'
           ? 'complete'
-          : cycleIndex === undefined || phaseIndex === undefined
-            ? `kind:${kind}`
-            : `${cycleIndex}:${phaseIndex}:${kind}`;
-      if (playedKeys.current.has(key)) {
-        return;
+          : cycleIndex !== undefined && phaseIndex !== undefined
+            ? `${cycleIndex}:${phaseIndex}:${kind}`
+            : null;
+      if (key !== null) {
+        if (playedKeys.current.has(key)) {
+          return;
+        }
+        playedKeys.current.add(key);
       }
-      playedKeys.current.add(key);
 
       if (!(await controller.play(kind))) {
         setSessionAvailable(false);

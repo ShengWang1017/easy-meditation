@@ -110,7 +110,7 @@ describe('useSessionAudio', () => {
     expect(setPreferenceEnabled).toHaveBeenLastCalledWith(true);
   });
 
-  it('plays each phase tuple once and completion once', async () => {
+  it('dedupes phase tuples, repeats legacy cues, and plays completion once', async () => {
     const players = enqueuePlayers();
     const view = render(
       <HookProbe
@@ -127,6 +127,7 @@ describe('useSessionAudio', () => {
       await latest.get('session')!.play('hold', 1, 0);
       await latest.get('session')!.play('complete', 1, 2);
       await latest.get('session')!.play('complete', 99, 99);
+      await latest.get('session')!.play('complete');
       await latest.get('session')!.play('exhale');
       await latest.get('session')!.play('exhale');
     });
@@ -136,7 +137,7 @@ describe('useSessionAudio', () => {
     expect(players.hold.seekTo).toHaveBeenCalledTimes(1);
     expect(players.complete.seekTo).toHaveBeenCalledTimes(1);
     expect(players.complete.play).toHaveBeenCalledTimes(1);
-    expect(players.exhale.play).toHaveBeenCalledTimes(1);
+    expect(players.exhale.play).toHaveBeenCalledTimes(2);
     view.unmount();
   });
 
