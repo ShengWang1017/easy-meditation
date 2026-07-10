@@ -293,6 +293,147 @@ describe('useAuthStore', () => {
     });
   });
 
+  it('tombstones a superseded token write before the latest auth failure propagates', async () => {
+    const operations: string[] = [];
+    let persistedRefreshToken: string | null = null;
+    let releaseOldWrite!: () => void;
+    let markOldWriteStarted!: () => void;
+    const oldWriteGate = new Promise<void>((resolve) => {
+      releaseOldWrite = resolve;
+    });
+    const oldWriteStarted = new Promise<void>((resolve) => {
+      markOldWriteStarted = resolve;
+    });
+    secureStore.setItemAsync.mockImplementation(async (_key, refreshToken: string) => {
+      operations.push(`set:${refreshToken}`);
+      if (refreshToken === 'stale-login-refresh') {
+        markOldWriteStarted();
+        await oldWriteGate;
+      }
+      persistedRefreshToken = refreshToken;
+    });
+    secureStore.deleteItemAsync.mockImplementation(async () => {
+      operations.push('delete');
+      persistedRefreshToken = null;
+    });
+    vi.spyOn(authApi, 'login').mockResolvedValue({
+      accessToken: 'stale-login-access',
+      refreshToken: 'stale-login-refresh'
+    });
+    const latestError = new Error('latest registration failed');
+    vi.spyOn(authApi, 'register').mockRejectedValue(latestError);
+
+    const oldAttempt = useAuthStore.getState().login({
+      email: 'old@example.com',
+      password: 'password123'
+    });
+    await oldWriteStarted;
+
+    const latestAttempt = useAuthStore.getState().register({
+      email: 'new@example.com',
+      password: 'password123'
+    });
+    let latestSettled = false;
+    const latestResult = latestAttempt.then(
+      () => ({ status: 'fulfilled' as const }),
+      (error: unknown) => ({ error, status: 'rejected' as const })
+    );
+    void latestResult.finally(() => {
+      latestSettled = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(authApi.register).toHaveBeenCalledTimes(1);
+    });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    const settledBeforeOldWrite = latestSettled;
+
+    releaseOldWrite();
+    await oldAttempt;
+    const result = await latestResult;
+
+    expect(settledBeforeOldWrite).toBe(false);
+    expect(result).toEqual({ error: latestError, status: 'rejected' });
+    expect(operations.slice(-2)).toEqual([
+      'set:stale-login-refresh',
+      'delete'
+    ]);
+    expect(persistedRefreshToken).toBeNull();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      sessionRevision: 0
+    });
+  });
+
+  it('writes the latest token after tombstoning a superseded token write', async () => {
+    const operations: string[] = [];
+    let persistedRefreshToken: string | null = null;
+    let releaseOldWrite!: () => void;
+    let markOldWriteStarted!: () => void;
+    const oldWriteGate = new Promise<void>((resolve) => {
+      releaseOldWrite = resolve;
+    });
+    const oldWriteStarted = new Promise<void>((resolve) => {
+      markOldWriteStarted = resolve;
+    });
+    secureStore.setItemAsync.mockImplementation(async (_key, refreshToken: string) => {
+      operations.push(`set:${refreshToken}`);
+      if (refreshToken === 'stale-login-refresh') {
+        markOldWriteStarted();
+        await oldWriteGate;
+      }
+      persistedRefreshToken = refreshToken;
+    });
+    secureStore.deleteItemAsync.mockImplementation(async () => {
+      operations.push('delete');
+      persistedRefreshToken = null;
+    });
+    vi.spyOn(authApi, 'login').mockResolvedValue({
+      accessToken: 'stale-login-access',
+      refreshToken: 'stale-login-refresh'
+    });
+    vi.spyOn(authApi, 'register').mockResolvedValue({
+      user: {
+        id: '3d3ca763-0ed4-4189-bd4e-bc0fb6302b72',
+        email: 'new@example.com',
+        nickname: null,
+        createdAt: '2026-07-08T00:00:00.000Z'
+      },
+      tokens: {
+        accessToken: 'registered-access',
+        refreshToken: 'registered-refresh'
+      }
+    });
+
+    const oldAttempt = useAuthStore.getState().login({
+      email: 'old@example.com',
+      password: 'password123'
+    });
+    await oldWriteStarted;
+    const latestAttempt = useAuthStore.getState().register({
+      email: 'new@example.com',
+      password: 'password123'
+    });
+
+    releaseOldWrite();
+    await Promise.all([oldAttempt, latestAttempt]);
+
+    expect(operations.slice(-3)).toEqual([
+      'set:stale-login-refresh',
+      'delete',
+      'set:registered-refresh'
+    ]);
+    expect(persistedRefreshToken).toBe('registered-refresh');
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'registered-access',
+      refreshToken: 'registered-refresh',
+      sessionRevision: 1
+    });
+  });
+
   it('revokes the refresh token with the backend before local logout cleanup', async () => {
     useAuthStore.setState({
       accessToken: 'session-access',

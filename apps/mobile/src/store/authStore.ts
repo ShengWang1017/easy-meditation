@@ -80,6 +80,22 @@ async function deleteStoredRefreshToken(): Promise<void> {
   }
 }
 
+async function settleAuthRequestAfterTombstone<T>(
+  request: Promise<T>,
+  tombstone: Promise<void>
+): Promise<T> {
+  let result: T;
+  try {
+    result = await request;
+  } catch (error) {
+    await tombstone;
+    throw error;
+  }
+
+  await tombstone;
+  return result;
+}
+
 function enqueueCleanup(operation: () => Promise<void>): Promise<void> {
   const result = cleanupTail.then(operation);
   cleanupTail = result.catch(() => undefined);
@@ -131,7 +147,11 @@ export const useAuthStore = create<AuthState>((set, get) => {
     isTerminating: false,
     async login(input) {
       const attempt = ++authAttemptGeneration;
-      const tokens = await authApi.login(input);
+      const tombstone = deleteStoredRefreshToken();
+      const tokens = await settleAuthRequestAfterTombstone(
+        authApi.login(input),
+        tombstone
+      );
       if (attempt !== authAttemptGeneration) {
         return;
       }
@@ -151,7 +171,11 @@ export const useAuthStore = create<AuthState>((set, get) => {
     },
     async register(input) {
       const attempt = ++authAttemptGeneration;
-      const result = await authApi.register(input);
+      const tombstone = deleteStoredRefreshToken();
+      const result = await settleAuthRequestAfterTombstone(
+        authApi.register(input),
+        tombstone
+      );
       if (attempt !== authAttemptGeneration) {
         return;
       }
