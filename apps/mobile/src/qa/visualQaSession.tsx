@@ -49,6 +49,28 @@ export function createVisualQaSessionOverride({
           (phase?.durationSeconds ?? 0) * (1 - snapshot.phaseProgress)
         )
       );
+  const phaseDurationMs = Math.max(
+    1_000,
+    (phase?.durationSeconds ?? 1) * 1_000
+  );
+  const fixtureVisualTimeMs =
+    snapshot.status === 'idle' || snapshot.status === 'completed'
+      ? 0
+      : Math.round(snapshot.phaseProgress * phaseDurationMs);
+  const visual = {
+    phaseKey:
+      snapshot.status === 'idle'
+        ? 'idle'
+        : snapshot.status === 'completed'
+          ? 'completed'
+          : `0:${phaseIndex}`,
+    phaseElapsedMs:
+      snapshot.status === 'completed'
+        ? 0
+        : Math.round(snapshot.phaseProgress * phaseDurationMs),
+    phaseDurationMs,
+    ambientElapsedMs: fixtureVisualTimeMs
+  } as const;
   const fixedSnapshot = {
     status: snapshot.status,
     elapsedSeconds: snapshot.elapsedSeconds,
@@ -62,18 +84,14 @@ export function createVisualQaSessionOverride({
       remainingInSession: snapshot.remainingSeconds,
       elapsedSeconds: snapshot.elapsedSeconds,
       isComplete
-    }
+    },
+    visual
   } as const;
   const noOp = () => undefined;
   const noOpAsync = async () => undefined;
 
   return {
-    fixtureVisualTimeMs:
-      snapshot.status === 'idle' || snapshot.status === 'completed'
-        ? 0
-        : Math.round(
-            snapshot.phaseProgress * (phase?.durationSeconds ?? 0) * 1_000
-          ),
+    fixtureVisualTimeMs,
     controller: {
       snapshot: fixedSnapshot,
       clientSessionId: 'visual-qa-session',

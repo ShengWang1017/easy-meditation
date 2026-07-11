@@ -127,6 +127,17 @@ describe('visual QA session override', () => {
           remainingInSession: snapshot.remainingSeconds,
           elapsedSeconds: snapshot.elapsedSeconds,
           isComplete
+        },
+        visual: {
+          phaseKey:
+            snapshot.status === 'idle'
+              ? 'idle'
+              : snapshot.status === 'completed'
+                ? 'completed'
+                : `0:${phaseIndex}`,
+          phaseElapsedMs: isComplete ? 0 : expectedVisualTimeMs,
+          phaseDurationMs: phases[phaseIndex]!.durationSeconds * 1_000,
+          ambientElapsedMs: expectedVisualTimeMs
         }
       });
       expect(override.fixtureVisualTimeMs).toBe(expectedVisualTimeMs);

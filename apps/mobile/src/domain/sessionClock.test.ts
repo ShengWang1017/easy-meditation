@@ -117,6 +117,64 @@ describe('mobile session clock', () => {
     });
   });
 
+  test('emits an exact visual phase anchor without changing integer counters', () => {
+    let time = 0;
+    const clock = createSessionClock(getSeedMethod(0), 120, () => time);
+
+    clock.start();
+    time = 250;
+    expect(clock.snapshot()).toMatchObject({
+      elapsedSeconds: 0,
+      remainingSeconds: 120,
+      visual: {
+        phaseKey: '0:0',
+        phaseElapsedMs: 250,
+        phaseDurationMs: 4_000,
+        ambientElapsedMs: 250
+      }
+    });
+
+    time = 3_999;
+    expect(clock.snapshot().visual).toEqual({
+      phaseKey: '0:0',
+      phaseElapsedMs: 3_999,
+      phaseDurationMs: 4_000,
+      ambientElapsedMs: 3_999
+    });
+
+    time = 4_000;
+    expect(clock.snapshot().visual).toEqual({
+      phaseKey: '0:1',
+      phaseElapsedMs: 0,
+      phaseDurationMs: 4_000,
+      ambientElapsedMs: 4_000
+    });
+
+    time = 16_250;
+    expect(clock.snapshot().visual.phaseKey).toBe('1:0');
+    expect(clock.snapshot().visual.phaseElapsedMs).toBe(250);
+  });
+
+  test('freezes exact phase and ambient milliseconds across pause', () => {
+    let time = 0;
+    const clock = createSessionClock(getSeedMethod(0), 120, () => time);
+    clock.start();
+    time = 1_375;
+    clock.pause();
+    const frozen = clock.snapshot().visual;
+
+    time = 31_375;
+    expect(clock.snapshot().visual).toEqual(frozen);
+
+    clock.resume();
+    time = 31_625;
+    expect(clock.snapshot().visual).toMatchObject({
+      phaseKey: '0:0',
+      phaseElapsedMs: 1_625,
+      ambientElapsedMs: 1_625
+    });
+  });
+
   test('freezes intentional endings at the 999ms and 1000ms persistence boundary', () => {
     let time = 0;
     const belowBoundary = createSessionClock(getSeedMethod(0), 120, () => time);

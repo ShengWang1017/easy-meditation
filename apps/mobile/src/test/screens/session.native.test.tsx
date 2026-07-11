@@ -206,6 +206,13 @@ function sessionSnapshot(
       remainingInSession: complete ? 0 : status === 'idle' ? 60 : 58,
       elapsedSeconds: complete ? 60 : status === 'idle' ? 0 : 2,
       isComplete: complete
+    },
+    visual: {
+      phaseKey:
+        status === 'idle' ? 'idle' : complete ? 'completed' : '0:0',
+      phaseElapsedMs: complete || status === 'idle' ? 0 : 2_000,
+      phaseDurationMs: 4_000,
+      ambientElapsedMs: complete ? 60_000 : status === 'idle' ? 0 : 2_000
     }
   };
 }

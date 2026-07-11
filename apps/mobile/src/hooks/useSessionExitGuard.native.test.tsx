@@ -49,6 +49,13 @@ function snapshot(status: SessionStatus): SessionClockSnapshot {
       remainingInSession: completed ? 0 : 48,
       elapsedSeconds: completed ? 60 : status === 'idle' ? 0 : 12,
       isComplete: completed
+    },
+    visual: {
+      phaseKey:
+        status === 'idle' ? 'idle' : completed ? 'completed' : '0:0',
+      phaseElapsedMs: completed || status === 'idle' ? 0 : 2_000,
+      phaseDurationMs: 4_000,
+      ambientElapsedMs: completed ? 60_000 : status === 'idle' ? 0 : 12_000
     }
   };
 }
