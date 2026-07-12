@@ -172,12 +172,16 @@ Execution date: 2026-07-12 CST. Overall status: **blocked**.
 
 ### Revision And Automated Gate
 
-- `git rev-parse HEAD` returned
-  `0cfbd322e6c99a4fdc5f280601eda3ce47fa34b6`.
+- Final `git rev-parse HEAD` for the automated gate returned
+  `0bdcea042810ca4b7caaaa669cb319495ab6a233`.
+- The Android smoke artifacts were captured at
+  `0cfbd322e6c99a4fdc5f280601eda3ce47fa34b6`; the subsequent lifecycle-only
+  fix handles initial mount while already inactive and does not alter the
+  renderer geometry or unblock the failed Expo Go surface.
 - All 8 requested non-device commands exited 0: mobile typecheck; 218 mobile
-  unit tests; 221 native component tests; 3 asset tests; 41 Web tests; 69
+  unit tests; 223 native component tests; 3 asset tests; 41 Web tests; 69
   tooling tests; the valid 13-state fixture; and `git diff --check`. The five
-  test commands ran 552 tests in total.
+  test commands ran 554 tests in total.
 
 ### Selected Android Target
 

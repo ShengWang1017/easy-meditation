@@ -104,12 +104,16 @@ Execution date: 2026-07-12 CST.
 ### Result
 
 - Status: **blocked**.
-- Source revision (`git rev-parse HEAD`):
-  `0cfbd322e6c99a4fdc5f280601eda3ce47fa34b6`.
+- Final automated-verification revision (`git rev-parse HEAD`):
+  `0bdcea042810ca4b7caaaa669cb319495ab6a233`.
+- The Android smoke attempt itself was captured at
+  `0cfbd322e6c99a4fdc5f280601eda3ce47fa34b6`. The later commit fixes initial
+  mount while already inactive and adds two lifecycle tests; it does not change
+  renderer geometry or make the blocked Expo Go session reachable.
 - The complete host gate passed: 8 of 8 commands exited 0. This covered
-  TypeScript, 218 mobile unit tests, 221 native component tests, 3 asset tests,
+  TypeScript, 218 mobile unit tests, 223 native component tests, 3 asset tests,
   41 Web tests, 69 tooling tests, the 13-state fixture validator, and
-  `git diff --check` (552 tests total).
+  `git diff --check` (554 tests total).
 - Installed-app or physical-device acceptance did not pass. The selected target
   had no `com.easymeditation.app`; the only available runtime was Expo Go on an
   emulator, which could provide smoke evidence only.
