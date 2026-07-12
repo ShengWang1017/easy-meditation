@@ -138,8 +138,12 @@ export function useBreathVisualTimeline(
   useEffect(() => {
     if (isFixture) return;
     const subscription = AppState.addEventListener('change', (state) => {
-      const nowMs = visualTime.value;
-      if (!Number.isFinite(nowMs)) return;
+      const rawTimeMs = visualTime.value;
+      const nowMs =
+        Number.isFinite(rawTimeMs) &&
+        rawTimeMs >= lastFiniteFrameTimeMs.value
+          ? rawTimeMs
+          : lastFiniteFrameTimeMs.value;
       if (state !== 'active') {
         appIsActive.current = false;
         const visibleMotion = motion.value;
@@ -177,13 +181,18 @@ export function useBreathVisualTimeline(
     correctionFrozen,
     correctionStartedAtMs,
     isFixture,
+    lastFiniteFrameTimeMs,
     motion,
     visualTime
   ]);
 
   useEffect(() => {
-    const nowMs = visualTime.value;
-    if (!Number.isFinite(nowMs)) return;
+    const rawTimeMs = visualTime.value;
+    const nowMs =
+      Number.isFinite(rawTimeMs) &&
+      rawTimeMs >= lastFiniteFrameTimeMs.value
+        ? rawTimeMs
+        : lastFiniteFrameTimeMs.value;
     if (isFixture) {
       const fixed = createBreathVisualAnchor(input, nowMs);
       if (!fixed) return;
@@ -244,6 +253,7 @@ export function useBreathVisualTimeline(
     input.reducedMotion,
     input.status,
     isFixture,
+    lastFiniteFrameTimeMs,
     motion,
     visualTime
   ]);
