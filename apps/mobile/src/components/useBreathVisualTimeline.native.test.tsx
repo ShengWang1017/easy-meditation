@@ -12,6 +12,7 @@ import type { BreathVisualInput } from '../domain/breathVisualTimeline';
 import { useBreathVisualTimeline } from './useBreathVisualTimeline';
 
 let appStateListener: ((state: AppStateStatus) => void) | null = null;
+const defaultAppStateCurrentState = AppState.currentState;
 
 const inhaleInput: BreathVisualInput = {
   phaseKey: '0:0',
@@ -92,8 +93,13 @@ describe('useBreathVisualTimeline', () => {
     configureReanimatedLogger({ strict: true });
   });
 
+  beforeEach(() => {
+    AppState.currentState = 'active';
+  });
+
   afterEach(() => {
     appStateListener = null;
+    AppState.currentState = defaultAppStateCurrentState;
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
@@ -142,6 +148,79 @@ describe('useBreathVisualTimeline', () => {
     expect(readTimeline(view).ambientTimeMs).toBe(250);
     view.unmount();
   });
+
+  it.each(['background', 'inactive'] as const)(
+    'freezes immediately when mounted while AppState is %s',
+    (initialState) => {
+      jest.useFakeTimers();
+      AppState.currentState = initialState;
+      const appStateSpy = jest
+        .spyOn(AppState, 'addEventListener')
+        .mockImplementation((_, listener) => {
+          appStateListener = listener;
+          return { remove: jest.fn() };
+        });
+      const clock = makeMutable(250);
+      const initialInput: BreathVisualInput = {
+        ...inhaleInput,
+        phaseElapsedMs: 250,
+        ambientElapsedMs: 250
+      };
+      const view = render(
+        <TimelineProbe clock={clock} input={initialInput} />
+      );
+      act(() => jest.advanceTimersByTime(17));
+      view.rerender(<TimelineProbe clock={clock} input={initialInput} />);
+      const visible = readTimeline(view);
+
+      const foregroundInput: BreathVisualInput = {
+        ...inhaleInput,
+        phaseElapsedMs: 2_000,
+        ambientElapsedMs: 10_000
+      };
+      act(() => {
+        clock.value = 10_000;
+        jest.advanceTimersByTime(34);
+      });
+      view.rerender(
+        <TimelineProbe clock={clock} input={foregroundInput} />
+      );
+      act(() => jest.advanceTimersByTime(17));
+      view.rerender(
+        <TimelineProbe clock={clock} input={foregroundInput} />
+      );
+      expect(readTimeline(view)).toEqual(visible);
+
+      act(() => {
+        appStateListener?.('active');
+        jest.advanceTimersByTime(17);
+      });
+      view.rerender(
+        <TimelineProbe clock={clock} input={foregroundInput} />
+      );
+      expect(readTimeline(view)).toEqual({
+        progress: 0.5,
+        ambientTimeMs: 250,
+        scale: visible.scale
+      });
+
+      act(() => {
+        clock.value = 10_300;
+        jest.advanceTimersByTime(34);
+      });
+      view.rerender(
+        <TimelineProbe clock={clock} input={foregroundInput} />
+      );
+      expect(readTimeline(view)).toEqual({
+        progress: 0.575,
+        ambientTimeMs: 550,
+        scale: getBreathMotion('inhale', 0.575, 550).scale
+      });
+
+      view.unmount();
+      appStateSpy.mockRestore();
+    }
+  );
 
   it('does not subscribe to AppState for a fixed fixture', () => {
     const appStateSpy = jest.spyOn(AppState, 'addEventListener');

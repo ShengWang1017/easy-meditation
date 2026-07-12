@@ -72,7 +72,9 @@ export function useBreathVisualTimeline(
   const correctionFrozen = useSharedValue(false);
   const lastFiniteFrameTimeMs = useSharedValue(initialTimeMs);
   const latestInput = useRef(input);
-  const appIsActive = useRef(true);
+  const appIsActive = useRef(
+    isFixture || AppState.currentState === 'active'
+  );
   latestInput.current = input;
 
   const projection = useDerivedValue(() => {
@@ -137,20 +139,29 @@ export function useBreathVisualTimeline(
 
   useEffect(() => {
     if (isFixture) return;
-    const subscription = AppState.addEventListener('change', (state) => {
+    const getEffectiveFrameTimeMs = () => {
       const rawTimeMs = visualTime.value;
-      const nowMs =
-        Number.isFinite(rawTimeMs) &&
+      return Number.isFinite(rawTimeMs) &&
         rawTimeMs >= lastFiniteFrameTimeMs.value
-          ? rawTimeMs
-          : lastFiniteFrameTimeMs.value;
+        ? rawTimeMs
+        : lastFiniteFrameTimeMs.value;
+    };
+    const freezeVisibleFrame = (nowMs: number) => {
+      appIsActive.current = false;
+      const visibleMotion = motion.value;
+      anchor.value = freezeBreathVisualClock(anchor.value, nowMs);
+      correctionFrom.value = visibleMotion;
+      correctionFrozen.value = true;
+      correctionStartedAtMs.value = nowMs - BREATH_CORRECTION_MS;
+    };
+    appIsActive.current = AppState.currentState === 'active';
+    if (!appIsActive.current) {
+      freezeVisibleFrame(getEffectiveFrameTimeMs());
+    }
+    const subscription = AppState.addEventListener('change', (state) => {
+      const nowMs = getEffectiveFrameTimeMs();
       if (state !== 'active') {
-        appIsActive.current = false;
-        const visibleMotion = motion.value;
-        anchor.value = freezeBreathVisualClock(anchor.value, nowMs);
-        correctionFrom.value = visibleMotion;
-        correctionFrozen.value = true;
-        correctionStartedAtMs.value = nowMs - BREATH_CORRECTION_MS;
+        freezeVisibleFrame(nowMs);
         return;
       }
 
