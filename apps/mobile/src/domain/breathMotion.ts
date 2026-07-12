@@ -16,14 +16,6 @@ export type BreathMotion = {
   orbit: number;
 };
 
-export type BreathTimeline = {
-  startedAtMs: number;
-  durationMs: number;
-  running: boolean;
-  loop: boolean;
-  frozenProgress: number;
-};
-
 export type OrganicBlobPoint = { x: number; y: number };
 
 export type OrganicBlobOptions = {
@@ -177,21 +169,6 @@ export function getBreathMotion(
   return reducedMotion
     ? mixBreathMotion(REDUCED_MOTION_NEUTRAL, motion, 0.35)
     : motion;
-}
-
-export function getBreathTransitionMs(reducedMotion: boolean): number {
-  'worklet';
-  return reducedMotion ? 520 : 260;
-}
-
-export function getBreathTimelineProgress(timeline: BreathTimeline, nowMs: number): number {
-  'worklet';
-  if (!timeline.running && !timeline.loop) return clamp01(timeline.frozenProgress);
-  const durationMs = Math.max(1, timeline.durationMs);
-  const rawProgress = timeline.loop
-    ? ((nowMs - timeline.startedAtMs) % durationMs) / durationMs
-    : clamp01((nowMs - timeline.startedAtMs) / durationMs);
-  return rawProgress < 0 ? rawProgress + 1 : rawProgress;
 }
 
 export function buildOrganicBlobPoints(options: OrganicBlobOptions): OrganicBlobPoint[] {

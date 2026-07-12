@@ -299,8 +299,20 @@ describe('SessionScreen', () => {
     expect(view.getByTestId('breathing-canvas').props).toMatchObject({
       status: 'idle',
       phases: boxMethod.phases,
-      phaseKind: 'inhale'
+      phaseKind: 'inhale',
+      visualTiming: {
+        phaseKey: 'idle',
+        phaseElapsedMs: 0,
+        phaseDurationMs: 4_000,
+        ambientElapsedMs: 0
+      }
     });
+    expect(
+      view.getByTestId('breathing-canvas').props.phaseProgress
+    ).toBeUndefined();
+    expect(
+      view.getByTestId('breathing-canvas').props.phaseDurationMs
+    ).toBeUndefined();
     for (const id of [
       'focus-start-view',
       'focus-title',
@@ -338,9 +350,20 @@ describe('SessionScreen', () => {
     expect(view.getByTestId('breathing-canvas').props).toMatchObject({
       fixtureVisualTimeMs: 2_000,
       phaseKind: 'inhale',
-      phaseProgress: 0.5,
-      status: 'running'
+      status: 'running',
+      visualTiming: {
+        phaseKey: '0:0',
+        phaseElapsedMs: 2_000,
+        phaseDurationMs: 4_000,
+        ambientElapsedMs: 2_000
+      }
     });
+    expect(
+      view.getByTestId('breathing-canvas').props.phaseProgress
+    ).toBeUndefined();
+    expect(
+      view.getByTestId('breathing-canvas').props.phaseDurationMs
+    ).toBeUndefined();
     for (const id of [
       'focus-running-view',
       'focus-phase-readout',
@@ -422,8 +445,8 @@ describe('SessionScreen', () => {
     expect(view.getByText('盒式呼吸法')).toBeTruthy();
     expect(view.queryByText('10 分钟')).toBeNull();
     expect(view.getByTestId('breathing-canvas').props).toMatchObject({
-      phaseDurationMs: 4_000,
-      phases: boxMethod.phases
+      phases: boxMethod.phases,
+      visualTiming: sessionSnapshot('idle').visual
     });
     expect(mockFocusOptions).toMatchObject({
       method: initialFocusOptions?.method,
@@ -437,8 +460,8 @@ describe('SessionScreen', () => {
     });
     expect(remounted.getByText('10 分钟')).toBeTruthy();
     expect(remounted.getByTestId('breathing-canvas').props).toMatchObject({
-      phaseDurationMs: 8_000,
-      phases: refreshedMethod.phases
+      phases: refreshedMethod.phases,
+      visualTiming: sessionSnapshot('idle').visual
     });
   });
 
@@ -465,8 +488,8 @@ describe('SessionScreen', () => {
     expect(view.getByRole('button', { name: '暂停' })).toBeTruthy();
     expect(view.getByRole('button', { name: '结束训练' })).toBeTruthy();
     expect(view.getByTestId('breathing-canvas').props).toMatchObject({
-      phaseDurationMs: 4_000,
-      phases: boxMethod.phases
+      phases: boxMethod.phases,
+      visualTiming: sessionSnapshot('running').visual
     });
     expect(mockFocusOptions).toMatchObject({
       method: initialFocusOptions?.method,

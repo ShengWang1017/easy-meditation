@@ -1,6 +1,7 @@
 import React from 'react';
 import { jest } from '@jest/globals';
 import { render } from '@testing-library/react-native';
+import { AppState } from 'react-native';
 
 const mockUseClock = jest.fn(() => ({ value: 0 }));
 const skiaJestModule = jest.requireMock<
@@ -8,7 +9,10 @@ const skiaJestModule = jest.requireMock<
 >('@shopify/react-native-skia');
 Object.assign(skiaJestModule, { useClock: () => mockUseClock() });
 
-const { BreathingCanvas } = require('./BreathingCanvas') as typeof import('./BreathingCanvas');
+const {
+  BreathingCanvas,
+  resolveBreathingCanvasFrame
+} = require('./BreathingCanvas') as typeof import('./BreathingCanvas');
 
 const phases = [
   { kind: 'inhale' as const, label: '吸气', durationSeconds: 4 },
@@ -18,13 +22,17 @@ const phases = [
 ];
 
 const commonProps = {
-  phaseDurationMs: 4_000,
   phaseIndex: 0,
   phaseKind: 'inhale' as const,
-  phaseProgress: 0.5,
   phases,
   reducedMotion: false,
-  status: 'running' as const
+  status: 'running' as const,
+  visualTiming: {
+    phaseKey: '0:0',
+    phaseElapsedMs: 2_000,
+    phaseDurationMs: 4_000,
+    ambientElapsedMs: 2_000
+  }
 };
 
 describe('BreathingCanvas fixture clock isolation', () => {
@@ -32,15 +40,29 @@ describe('BreathingCanvas fixture clock isolation', () => {
     mockUseClock.mockClear();
   });
 
-  it('does not mount the Skia clock for a fixed fixture frame', () => {
-    render(<BreathingCanvas {...commonProps} fixtureVisualTimeMs={2_000} />);
+  it('keeps a fixed fixture deterministic without mounting the live clock', () => {
+    const appStateSpy = jest.spyOn(AppState, 'addEventListener');
+    const frameA = resolveBreathingCanvasFrame(commonProps, 2_000, 2_000);
+    const frameB = resolveBreathingCanvasFrame(commonProps, 2_000, 2_000);
+    expect(frameB).toEqual(frameA);
 
+    const view = render(
+      <BreathingCanvas {...commonProps} fixtureVisualTimeMs={2_000} />
+    );
     expect(mockUseClock).not.toHaveBeenCalled();
+    expect(appStateSpy).not.toHaveBeenCalled();
+    view.unmount();
+    appStateSpy.mockRestore();
   });
 
   it('keeps the Skia clock mounted for normal live rendering', () => {
-    render(<BreathingCanvas {...commonProps} />);
+    const appStateSpy = jest
+      .spyOn(AppState, 'addEventListener')
+      .mockImplementation(() => ({ remove: jest.fn() }));
+    const view = render(<BreathingCanvas {...commonProps} />);
 
     expect(mockUseClock).toHaveBeenCalledTimes(1);
+    view.unmount();
+    appStateSpy.mockRestore();
   });
 });

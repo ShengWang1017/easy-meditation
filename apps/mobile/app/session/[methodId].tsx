@@ -339,8 +339,6 @@ function FocusSessionPresentation({
   const actionsQa = useVisualQaRegistration(
     isReady ? undefined : 'focus-actions'
   );
-  const phase = runBundle.resolved.phases[snapshot.phase.phaseIndex];
-  const phaseDurationMs = (phase?.durationSeconds ?? 1) * 1_000;
   const durationMinutes = runBundle.resolved.plannedDurationSeconds / 60;
   const SoundIcon = audio.enabled
     ? referenceSoundIcons.on
@@ -411,13 +409,12 @@ function FocusSessionPresentation({
         >
           <BreathingCanvas
             fixtureVisualTimeMs={fixtureVisualTimeMs}
-            phaseDurationMs={phaseDurationMs}
             phaseIndex={snapshot.phase.phaseIndex}
             phaseKind={snapshot.phase.kind}
-            phaseProgress={snapshot.phase.phaseProgress}
             phases={runBundle.resolved.phases}
             reducedMotion={reducedMotion}
             status={snapshot.status}
+            visualTiming={snapshot.visual}
           />
         </View>
 

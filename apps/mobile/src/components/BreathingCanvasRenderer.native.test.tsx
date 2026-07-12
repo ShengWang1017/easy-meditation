@@ -58,7 +58,7 @@ describe('BreathingCanvasRenderer contract', () => {
         radius: 1.18,
         points: 34,
         amp: 0.045,
-        timeScale: 0.26,
+        timeScale: 0.28,
         seed: 0.4,
         scaleX: 1.02,
         scaleY: 0.98
@@ -98,7 +98,7 @@ describe('BreathingCanvasRenderer contract', () => {
         points: 42,
         ampBase: 0.06,
         ampOrbit: 0.03,
-        timeScale: 0.46,
+        timeScale: 0.4,
         seed: 1.2,
         scaleX: 1.01,
         scaleY: 1.02,
@@ -126,6 +126,7 @@ describe('BreathingCanvasRenderer contract', () => {
       texture: {
         count: 42,
         blendMode: 'screen',
+        timeScale: 0.22,
         driftAngle: 0.16,
         distanceBase: 0.42,
         distanceScale: 0.5,
@@ -136,8 +137,8 @@ describe('BreathingCanvasRenderer contract', () => {
         alphaScale: 1.8
       },
       center: {
-        pulseTimeScale: 2.2,
-        pulseAmplitude: 0.04,
+        pulseTimeScale: 0.4,
+        pulseAmplitude: 0.02,
         radiusBase: 0.115,
         radiusBloom: 0.02,
         alphaBase: 0.32,

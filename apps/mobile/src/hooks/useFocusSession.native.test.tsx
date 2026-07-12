@@ -219,6 +219,27 @@ describe('useFocusSession', () => {
     return { ...view, options, putLedgerEntry, submit, audio, elapse };
   }
 
+  it('publishes exact visual timing at 250ms without changing integer counters', () => {
+    const view = harness();
+    act(() => latest.start());
+    view.elapse(250);
+    expect(latest.snapshot).toMatchObject({
+      status: 'running',
+      elapsedSeconds: 0,
+      visual: {
+        phaseKey: '0:0',
+        phaseElapsedMs: 250,
+        phaseDurationMs: 1_000,
+        ambientElapsedMs: 250
+      }
+    });
+
+    act(() => latest.pause());
+    const frozen = latest.snapshot.visual;
+    view.elapse(5_000);
+    expect(latest.snapshot.visual).toEqual(frozen);
+  });
+
   it('writes a natural completion once before a fire-and-catch built-in POST', async () => {
     const write = deferred<void>();
     const view = harness({

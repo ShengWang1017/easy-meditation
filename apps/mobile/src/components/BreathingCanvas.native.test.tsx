@@ -1,8 +1,6 @@
 import type { BreathingPhase } from '@easy-meditation/shared';
-import {
-  resolveBreathTransitionDirective,
-  resolveBreathingCanvasFrame
-} from './BreathingCanvas';
+import { readFileSync } from 'node:fs';
+import { resolveBreathingCanvasFrame } from './BreathingCanvas';
 
 const phases: BreathingPhase[] = [
   { kind: 'inhale', label: '吸气', durationSeconds: 4 },
@@ -11,50 +9,68 @@ const phases: BreathingPhase[] = [
   { kind: 'hold', label: '屏息', durationSeconds: 4 }
 ];
 
-describe('BreathingCanvas legacy timing contract', () => {
-  it('uses authoritative phase progress and freezes it while paused', () => {
-    const base = {
-      phases,
-      phaseIndex: 0,
-      phaseKind: 'inhale' as const,
-      phaseProgress: 0.37,
-      phaseDurationMs: 4_000,
-      reducedMotion: false
-    };
+const base = {
+  phases,
+  phaseIndex: 0,
+  phaseKind: 'inhale' as const,
+  status: 'running' as const,
+  reducedMotion: false,
+  visualTiming: {
+    phaseKey: '0:0',
+    phaseElapsedMs: 1_000,
+    phaseDurationMs: 4_000,
+    ambientElapsedMs: 1_000
+  }
+};
 
-    expect(resolveBreathingCanvasFrame({ ...base, status: 'running' }, 250).progress).toBe(
-      0.37
+describe('BreathingCanvas continuous timing contract', () => {
+  it('projects running motion continuously from frame time', () => {
+    expect(resolveBreathingCanvasFrame(base, 0).progress).toBe(0.25);
+    expect(resolveBreathingCanvasFrame(base, 250).progress).toBe(0.3125);
+    expect(resolveBreathingCanvasFrame(base, 500).progress).toBe(0.375);
+  });
+
+  it('keeps paused progress and ambient outline identical', () => {
+    const paused = { ...base, status: 'paused' as const };
+    expect(resolveBreathingCanvasFrame(paused, 250)).toEqual(
+      resolveBreathingCanvasFrame(paused, 30_000)
     );
-    expect(resolveBreathingCanvasFrame({ ...base, status: 'running' }, 3_250).progress).toBe(
-      0.37
+  });
+
+  it('does not use spring or timing animations for the authoritative clock', () => {
+    const source = readFileSync(
+      `${process.cwd()}/src/components/useBreathVisualTimeline.ts`,
+      'utf8'
     );
-    expect(resolveBreathingCanvasFrame({ ...base, status: 'paused' }, 9_250).progress).toBe(
-      0.37
-    );
+    expect(source).not.toMatch(/withSpring|withTiming/);
   });
 
   it('loops ambient progress only for ready and complete states', () => {
     const ready = resolveBreathingCanvasFrame(
       {
-        phases,
-        phaseIndex: 0,
-        phaseKind: 'inhale',
-        phaseProgress: 0,
-        phaseDurationMs: 4_000,
+        ...base,
         status: 'idle',
-        reducedMotion: false
+        visualTiming: {
+          phaseKey: 'idle',
+          phaseElapsedMs: 0,
+          phaseDurationMs: 4_000,
+          ambientElapsedMs: 0
+        }
       },
       2_300
     );
     const complete = resolveBreathingCanvasFrame(
       {
-        phases,
+        ...base,
         phaseIndex: 3,
         phaseKind: 'complete',
-        phaseProgress: 1,
-        phaseDurationMs: 4_000,
         status: 'completed',
-        reducedMotion: false
+        visualTiming: {
+          phaseKey: 'completed',
+          phaseElapsedMs: 0,
+          phaseDurationMs: 4_000,
+          ambientElapsedMs: 0
+        }
       },
       2_000
     );
@@ -66,13 +82,16 @@ describe('BreathingCanvas legacy timing contract', () => {
   it('forces completed status to the complete visual even with a stale phase kind', () => {
     const frame = resolveBreathingCanvasFrame(
       {
-        phases,
+        ...base,
         phaseIndex: 2,
         phaseKind: 'exhale',
-        phaseProgress: 1,
-        phaseDurationMs: 4_000,
         status: 'completed',
-        reducedMotion: false
+        visualTiming: {
+          phaseKey: 'completed',
+          phaseElapsedMs: 0,
+          phaseDurationMs: 4_000,
+          ambientElapsedMs: 0
+        }
       },
       2_000
     );
@@ -80,60 +99,23 @@ describe('BreathingCanvas legacy timing contract', () => {
     expect(frame.kind).toBe('complete');
   });
 
-  it('freezes paused motion instead of applying ambient visual-time waves', () => {
-    const pausedProps = {
-      phases,
-      phaseIndex: 0,
-      phaseKind: 'inhale' as const,
-      phaseProgress: 0.37,
-      phaseDurationMs: 4_000,
-      status: 'paused' as const,
-      reducedMotion: false
-    };
-
-    expect(resolveBreathingCanvasFrame(pausedProps, 250)).toEqual(
-      resolveBreathingCanvasFrame(pausedProps, 3_250)
-    );
-  });
-
   it('keeps paused complete-kind input frozen until status becomes completed', () => {
     const pausedCompleteProps = {
-      phases,
+      ...base,
       phaseIndex: 3,
       phaseKind: 'complete' as const,
-      phaseProgress: 1,
-      phaseDurationMs: 4_000,
       status: 'paused' as const,
-      reducedMotion: false
+      visualTiming: {
+        phaseKey: '0:3',
+        phaseElapsedMs: 4_000,
+        phaseDurationMs: 4_000,
+        ambientElapsedMs: 16_000
+      }
     };
 
     const early = resolveBreathingCanvasFrame(pausedCompleteProps, 250);
     const late = resolveBreathingCanvasFrame(pausedCompleteProps, 3_250);
     expect(early).toEqual(late);
     expect(early).toMatchObject({ kind: 'complete', progress: 1 });
-  });
-
-  it('snaps an in-flight transition on pause and starts resumed frames settled', () => {
-    const running = {
-      kind: 'inhale' as const,
-      reducedMotion: false,
-      status: 'running' as const
-    };
-    const paused = { ...running, status: 'paused' as const };
-
-    expect(resolveBreathTransitionDirective(running, paused)).toBe('snap');
-    expect(resolveBreathTransitionDirective(paused, running)).toBe('none');
-    expect(
-      resolveBreathTransitionDirective(running, {
-        ...running,
-        kind: 'exhale'
-      })
-    ).toBe('animate');
-    expect(
-      resolveBreathTransitionDirective(paused, {
-        ...paused,
-        kind: 'hold-full'
-      })
-    ).toBe('snap');
   });
 });

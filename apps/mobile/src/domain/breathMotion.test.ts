@@ -5,8 +5,6 @@ import {
   BREATH_TEXTURE,
   buildOrganicBlobPoints,
   getBreathMotion,
-  getBreathTimelineProgress,
-  getBreathTransitionMs,
   mixBreathMotion,
   resolveBreathVisualKind,
   smootherstep
@@ -144,37 +142,6 @@ describe('motion transitions and timing', () => {
     });
   });
 
-  it('uses 260ms normally and 520ms for reduced motion', () => {
-    expect(getBreathTransitionMs(false)).toBe(260);
-    expect(getBreathTransitionMs(true)).toBe(520);
-  });
-
-  it('freezes paused progress while allowing ambient loops', () => {
-    expect(
-      getBreathTimelineProgress(
-        {
-          startedAtMs: 100,
-          durationMs: 1_000,
-          running: false,
-          loop: false,
-          frozenProgress: 0.42
-        },
-        900
-      )
-    ).toBe(0.42);
-    expect(
-      getBreathTimelineProgress(
-        {
-          startedAtMs: 100,
-          durationMs: 1_000,
-          running: false,
-          loop: true,
-          frozenProgress: 0
-        },
-        1_350
-      )
-    ).toBe(0.25);
-  });
 });
 
 describe('organic geometry and texture', () => {

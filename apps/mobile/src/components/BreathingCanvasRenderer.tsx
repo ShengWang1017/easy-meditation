@@ -134,7 +134,7 @@ export const BREATH_RENDER_SPEC = {
     radius: 1.18,
     points: 34,
     amp: 0.045,
-    timeScale: 0.26,
+    timeScale: 0.28,
     seed: 0.4,
     scaleX: 1.02,
     scaleY: 0.98
@@ -174,7 +174,7 @@ export const BREATH_RENDER_SPEC = {
     points: 42,
     ampBase: 0.06,
     ampOrbit: 0.03,
-    timeScale: 0.46,
+    timeScale: 0.4,
     seed: 1.2,
     scaleX: 1.01,
     scaleY: 1.02,
@@ -202,6 +202,7 @@ export const BREATH_RENDER_SPEC = {
   texture: {
     count: 42,
     blendMode: 'screen',
+    timeScale: 0.22,
     driftAngle: 0.16,
     distanceBase: 0.42,
     distanceScale: 0.5,
@@ -212,8 +213,8 @@ export const BREATH_RENDER_SPEC = {
     alphaScale: 1.8
   },
   center: {
-    pulseTimeScale: 2.2,
-    pulseAmplitude: 0.04,
+    pulseTimeScale: 0.4,
+    pulseAmplitude: 0.02,
     radiusBase: 0.115,
     radiusBloom: 0.02,
     alphaBase: 0.32,
@@ -534,7 +535,12 @@ export function BreathParticle({
   const center = useDerivedValue(() => {
     const driftAngle =
       particle.angle +
-      Math.sin(timeSeconds.value * particle.drift + particle.angle) *
+      Math.sin(
+        timeSeconds.value *
+          BREATH_RENDER_SPEC.texture.timeScale *
+          particle.drift +
+          particle.angle
+      ) *
         BREATH_RENDER_SPEC.texture.driftAngle;
     const distance =
       radius.value *
