@@ -1,8 +1,9 @@
 # Mobile Visual And Performance QA
 
 Status: **host foundation and deterministic Web/native fixture runtimes wired;
-authorized Web reference capture complete; native visual and performance
-acceptance not run**.
+authorized Web reference capture complete; Android Expo Go dynamic smoke
+attempted but blocked before a session rendered; installed-app native visual
+and performance acceptance not run**.
 
 This document describes the deterministic tooling currently present in the
 repository and the work still required before any screenshot or frame-rate
@@ -164,3 +165,83 @@ also require all explicit selectors and paths before they can execute.
 Only after those steps should an authorized orchestrator call the injected
 capture adapters, produce bounded sanitized evidence, and populate the
 accepted directory.
+
+## Organic Breath Motion — 2026-07-11
+
+Execution date: 2026-07-12 CST. Overall status: **blocked**.
+
+### Revision And Automated Gate
+
+- `git rev-parse HEAD` returned
+  `0cfbd322e6c99a4fdc5f280601eda3ce47fa34b6`.
+- All 8 requested non-device commands exited 0: mobile typecheck; 218 mobile
+  unit tests; 221 native component tests; 3 asset tests; 41 Web tests; 69
+  tooling tests; the valid 13-state fixture; and `git diff --check`. The five
+  test commands ran 552 tests in total.
+
+### Selected Android Target
+
+- Explicit serial: `emulator-5554` from `adb devices -l`.
+- Google `sdk_gphone64_arm64` emulator; Android 14 / API 34.
+- `1080x2400` physical pixels at `420 dpi`, yielding a measured normalized
+  width of `411.42857142857144` logical pixels.
+- No installed `com.easymeditation.app` package was present. Package
+  `host.exp.exponent` was used for an Expo Go smoke attempt only.
+- Runtime: Expo SDK 53 development bundle under Expo Go, Hermes and Fabric/new
+  architecture, served from the clean worktree on Metro port 8082. A local QA
+  API on port 4000 was used only after both ports were explicitly reversed.
+
+### Measurements And Files
+
+Evidence is ignored at
+`/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/`.
+
+At the measured viewport, the production width rule resolved a
+`320.9142857142857 px` Canvas. Fresh 60 Hz production-function sampling measured
+the following maximum per-frame logical core-radius deltas:
+
+| Phase duration | Inhale maximum | Exhale maximum | Host numeric gate |
+| --- | ---: | ---: | --- |
+| 4,000 ms | `0.3048544574369316 px` | `0.3048544574369174 px` | passed (`<= 1.0 px`) |
+| 1,000 ms | `1.2185712725333389 px` | `1.2185712725333389 px` | passed (`<= 1.5 px`) |
+
+The source data is at
+`/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/radius-metrics.json`.
+This proves the deterministic host radius calculation only; no device frames
+were available for visual inspection.
+
+Required recording targets and their literal status:
+
+- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-default.mp4`
+  — absent / blocked before session start.
+- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-custom-1s.mp4`
+  — absent / blocked before custom configuration.
+- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-lifecycle.mp4`
+  — absent / blocked before lifecycle or reduced-motion exercise.
+
+Because no default session could be displayed and warmed, the package graphics
+statistics were not reset or sampled. `android-breath-framestats.txt` and
+`android-breath-frame-gate.json` are absent; analyzer `averageFps` and
+`maxConsecutiveOver50Ms` are unavailable rather than zero.
+
+The requested filtered error command produced an empty, preserved file:
+`/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/react-native-errors.log`
+(`ReactNativeJS:E` count 0 lines / 0 bytes). The broader native log is not clean:
+the authenticated practice render reproducibly failed with
+`RetryableMountingLayerException: Unable to find viewState for tag 10. Surface stopped: false`
+after repeated concurrent-render recovery warnings.
+
+### Blocked Rationale
+
+The initial auth recovery network block was resolved by starting the local API
+and adding only the explicit port-4000 reverse. A clean adb force-stop/relaunch
+without clearing Expo Go data then reproduced the same Fabric failure while the
+manifest identified the expected clean worktree and port 8082. Evidence:
+
+- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-clean-relaunch.log`
+- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure.png`
+- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure-ui.xml`
+
+Dynamic emulator/Expo Go smoke, Android frame performance, installed-app
+acceptance, and physical-device acceptance remain blocked. No metrics or
+recordings were manufactured from the error screen.
