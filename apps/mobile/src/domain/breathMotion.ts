@@ -76,84 +76,22 @@ export function resolveBreathVisualKind(
   return phases[previousIndex]?.kind === 'exhale' ? 'hold-empty' : 'hold-full';
 }
 
-export function getBreathMotion(
-  kind: BreathVisualKind,
-  progress: number,
-  visualTimeMs: number,
-  reducedMotion = false
-): BreathMotion {
+function clamp01(value: number): number {
   'worklet';
-  const wave = Math.sin(visualTimeMs / 820);
-  const slowWave = Math.sin(visualTimeMs / 1_450);
-  let motion: BreathMotion;
+  return Math.max(0, Math.min(1, value));
+}
 
-  if (kind === 'ready') {
-    motion = {
-      scale: 0.7,
-      bloom: 0.54,
-      rotate: -0.13,
-      lift: 12,
-      orbit: 0.24
-    };
-  } else if (kind === 'inhale') {
-    const clampedProgress = clamp01(progress);
-    if (clampedProgress === 0) {
-      motion = { scale: 0.7, bloom: 0.54, rotate: -0.13, lift: 12, orbit: 0.24 };
-    } else if (clampedProgress === 1) {
-      motion = { scale: 1.08, bloom: 0.88, rotate: 0.04, lift: -4, orbit: 0.52 };
-    } else {
-      const t = easeInOutCubic(clampedProgress);
-      const endpointGuard = Math.sin(clampedProgress * Math.PI);
-      motion = {
-        scale: lerp(0.7, 1.08, t) + wave * 0.006 * endpointGuard,
-        bloom: lerp(0.54, 0.88, t),
-        rotate: lerp(-0.13, 0.04, t) + slowWave * 0.014 * endpointGuard,
-        lift: lerp(12, -4, t),
-        orbit: lerp(0.24, 0.52, t)
-      };
-    }
-  } else if (kind === 'hold-full') {
-    const swell = Math.sin(clamp01(progress) * Math.PI);
-    motion = {
-      scale: 1.08 + swell * 0.018,
-      bloom: 0.88 + swell * 0.02,
-      rotate: 0.04 + slowWave * 0.024 * swell,
-      lift: -4 + wave * 3.2 * swell,
-      orbit: 0.52 + swell * 0.16
-    };
-  } else if (kind === 'hold-empty') {
-    const stillness = Math.sin(clamp01(progress) * Math.PI);
-    motion = {
-      scale: 0.7 + stillness * 0.014,
-      bloom: 0.54 + stillness * 0.02,
-      rotate: -0.13 + slowWave * 0.018 * stillness,
-      lift: 12 + wave * 2 * stillness,
-      orbit: 0.24 + stillness * 0.06
-    };
-  } else if (kind === 'exhale') {
-    const t = easeInOutCubic(progress);
-    motion = {
-      scale: lerp(1.08, 0.7, t) + wave * 0.004,
-      bloom: lerp(0.88, 0.54, t),
-      rotate:
-        lerp(0.04, -0.13, t) +
-        slowWave * 0.012 * Math.sin(clamp01(progress) * Math.PI),
-      lift: lerp(-4, 12, t),
-      orbit: lerp(0.52, 0.24, t)
-    };
-  } else {
-    motion = {
-      scale: 0.84 + Math.sin(clamp01(progress) * Math.PI * 2) * 0.018,
-      bloom: 0.62,
-      rotate: slowWave * 0.02,
-      lift: 7 + wave * 1.8,
-      orbit: 0.3
-    };
-  }
+function lerp(start: number, end: number, amount: number): number {
+  'worklet';
+  if (amount === 0) return start;
+  if (amount === 1) return end;
+  return start + (end - start) * amount;
+}
 
-  return reducedMotion
-    ? mixBreathMotion(REDUCED_MOTION_NEUTRAL, motion, 0.35)
-    : motion;
+export function smootherstep(value: number): number {
+  'worklet';
+  const t = clamp01(value);
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 export function mixBreathMotion(
@@ -170,6 +108,75 @@ export function mixBreathMotion(
     lift: lerp(from.lift, to.lift, t),
     orbit: lerp(from.orbit, to.orbit, t)
   };
+}
+
+export function getBreathMotion(
+  kind: BreathVisualKind,
+  progress: number,
+  visualTimeMs: number,
+  reducedMotion = false
+): BreathMotion {
+  'worklet';
+  const wave = Math.sin(visualTimeMs / 820);
+  const slowWave = Math.sin(visualTimeMs / 1_450);
+  const envelope = smootherstep(progress);
+  let motion: BreathMotion;
+
+  if (kind === 'ready') {
+    motion = {
+      scale: 0.7,
+      bloom: 0.54,
+      rotate: -0.13,
+      lift: 12,
+      orbit: 0.24
+    };
+  } else if (kind === 'inhale') {
+    motion = {
+      scale: lerp(0.7, 1.08, envelope),
+      bloom: lerp(0.54, 0.88, envelope),
+      rotate: lerp(-0.13, 0.04, envelope),
+      lift: lerp(12, -4, envelope),
+      orbit: lerp(0.24, 0.52, envelope)
+    };
+  } else if (kind === 'hold-full') {
+    const pulse = Math.sin(smootherstep(progress) * Math.PI) ** 2;
+    motion = {
+      scale: 1.08 * (1 + 0.015 * pulse),
+      bloom: 0.88 + pulse * 0.02,
+      rotate: 0.04 + slowWave * 0.024 * pulse,
+      lift: -4 + wave * 3.2 * pulse,
+      orbit: 0.52 + pulse * 0.16
+    };
+  } else if (kind === 'hold-empty') {
+    const pulse = Math.sin(smootherstep(progress) * Math.PI) ** 2;
+    motion = {
+      scale: 0.7 * (1 + 0.01 * pulse),
+      bloom: 0.54 + pulse * 0.02,
+      rotate: -0.13 + slowWave * 0.018 * pulse,
+      lift: 12 + wave * 2 * pulse,
+      orbit: 0.24 + pulse * 0.06
+    };
+  } else if (kind === 'exhale') {
+    motion = {
+      scale: lerp(1.08, 0.7, envelope),
+      bloom: lerp(0.88, 0.54, envelope),
+      rotate: lerp(0.04, -0.13, envelope),
+      lift: lerp(-4, 12, envelope),
+      orbit: lerp(0.52, 0.24, envelope)
+    };
+  } else {
+    motion = {
+      scale: 0.84 + Math.sin(clamp01(progress) * Math.PI * 2) * 0.018,
+      bloom: 0.62,
+      rotate: slowWave * 0.02,
+      lift: 7 + wave * 1.8,
+      orbit: 0.3
+    };
+  }
+
+  return reducedMotion
+    ? mixBreathMotion(REDUCED_MOTION_NEUTRAL, motion, 0.35)
+    : motion;
 }
 
 export function getBreathTransitionMs(reducedMotion: boolean): number {
@@ -192,29 +199,13 @@ export function buildOrganicBlobPoints(options: OrganicBlobOptions): OrganicBlob
   return Array.from({ length: options.points }, (_, index) => {
     const angle = (index / options.points) * Math.PI * 2;
     const noise =
-      Math.sin(angle * 3 + options.time + options.seed) * 0.55 +
-      Math.sin(angle * 5 - options.time * 1.21 + options.seed * 1.7) * 0.32 +
-      Math.sin(angle * 7 + options.time * 0.72 + options.seed * 0.8) * 0.13;
+      Math.sin(angle * 3 + options.time + options.seed) * 0.52 +
+      Math.sin(angle * 5 - options.time * 0.68 + options.seed * 1.7) * 0.31 +
+      Math.sin(angle * 7 + options.time * 0.37 + options.seed * 0.8) * 0.17;
     const localRadius = options.radius * (1 + noise * options.amp);
     return {
       x: options.cx + Math.cos(angle) * localRadius * (options.scaleX ?? 1),
       y: options.cy + Math.sin(angle) * localRadius * (options.scaleY ?? 1)
     };
   });
-}
-
-function clamp01(value: number): number {
-  'worklet';
-  return Math.max(0, Math.min(1, value));
-}
-
-function lerp(start: number, end: number, amount: number): number {
-  'worklet';
-  return start + (end - start) * amount;
-}
-
-function easeInOutCubic(value: number): number {
-  'worklet';
-  const t = clamp01(value);
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }

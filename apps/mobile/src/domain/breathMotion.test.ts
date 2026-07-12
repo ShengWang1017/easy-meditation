@@ -1,4 +1,5 @@
 import type { BreathingPhase } from '@easy-meditation/shared';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   BREATH_TEXTURE,
@@ -7,7 +8,8 @@ import {
   getBreathTimelineProgress,
   getBreathTransitionMs,
   mixBreathMotion,
-  resolveBreathVisualKind
+  resolveBreathVisualKind,
+  smootherstep
 } from './breathMotion';
 
 const boxPhases: BreathingPhase[] = [
@@ -34,6 +36,35 @@ describe('resolveBreathVisualKind', () => {
 });
 
 describe('getBreathMotion', () => {
+  it('uses the exact smootherstep envelope', () => {
+    expect(smootherstep(-1)).toBe(0);
+    expect(smootherstep(0.25)).toBe(0.103515625);
+    expect(smootherstep(0.5)).toBe(0.5);
+    expect(smootherstep(0.75)).toBe(0.896484375);
+    expect(smootherstep(2)).toBe(1);
+  });
+
+  it.each([0, 1_234, 9_876])(
+    'keeps inhale and exhale endpoints exact at ambient time %s',
+    (ambientTimeMs) => {
+      expect(getBreathMotion('inhale', 0, ambientTimeMs).scale).toBe(0.7);
+      expect(getBreathMotion('inhale', 1, ambientTimeMs).scale).toBe(1.08);
+      expect(getBreathMotion('exhale', 0, ambientTimeMs).scale).toBe(1.08);
+      expect(getBreathMotion('exhale', 1, ambientTimeMs).scale).toBe(0.7);
+    }
+  );
+
+  it('keeps hold micro-swell inside the approved percentages', () => {
+    const full = Array.from({ length: 121 }, (_, index) =>
+      getBreathMotion('hold-full', index / 120, index * 16.67).scale
+    );
+    const empty = Array.from({ length: 121 }, (_, index) =>
+      getBreathMotion('hold-empty', index / 120, index * 16.67).scale
+    );
+    expect(Math.max(...full)).toBeLessThanOrEqual(1.08 * 1.015);
+    expect(Math.max(...empty)).toBeLessThanOrEqual(0.7 * 1.01);
+  });
+
   it('matches the exact inhale endpoints from the Web renderer', () => {
     expect(getBreathMotion('inhale', 0, 0)).toEqual({
       scale: 0.7,
@@ -72,6 +103,27 @@ describe('getBreathMotion', () => {
         8
       );
     }
+  });
+
+  it('declares worklet dependencies before getBreathMotion', () => {
+    const source = readFileSync(
+      `${process.cwd()}/src/domain/breathMotion.ts`,
+      'utf8'
+    );
+    const motionWorklet = source.indexOf('export function getBreathMotion(');
+
+    expect(motionWorklet).toBeGreaterThanOrEqual(0);
+    for (const dependency of [
+      'function clamp01(',
+      'function lerp(',
+      'export function smootherstep(',
+      'export function mixBreathMotion('
+    ]) {
+      const dependencyIndex = source.indexOf(dependency);
+      expect(dependencyIndex).toBeGreaterThanOrEqual(0);
+      expect(dependencyIndex).toBeLessThan(motionWorklet);
+    }
+    expect(source).not.toContain('function easeInOutCubic(');
   });
 });
 
@@ -143,7 +195,41 @@ describe('organic geometry and texture', () => {
     expect(points[0]?.x).toBeCloseTo(440, 8);
     expect(points[0]?.y).toBeCloseTo(320, 8);
     expect(points[3]?.x).toBeCloseTo(320, 8);
-    expect(points[3]?.y).toBeCloseTo(237.12, 8);
+    expect(points[3]?.y).toBeCloseTo(236.96, 8);
+  });
+
+  it('keeps coherent topology calm frame-to-frame while evolving over 15 seconds', () => {
+    const options = {
+      cx: 0,
+      cy: 0,
+      radius: 100,
+      points: 42,
+      amp: 0.075,
+      seed: 1.2
+    };
+    const first = buildOrganicBlobPoints({ ...options, time: 0 });
+    const nextFrame = buildOrganicBlobPoints({
+      ...options,
+      time: (1 / 60) * 0.4
+    });
+    const after15Seconds = buildOrganicBlobPoints({
+      ...options,
+      time: 15 * 0.4
+    });
+    const maximumAdjacentDelta = Math.max(
+      ...first.map((point, index) =>
+        Math.hypot(
+          point.x - nextFrame[index]!.x,
+          point.y - nextFrame[index]!.y
+        )
+      )
+    );
+
+    expect(first).toHaveLength(42);
+    expect(nextFrame).toHaveLength(42);
+    expect(after15Seconds).toHaveLength(42);
+    expect(maximumAdjacentDelta).toBeLessThan(0.5);
+    expect(after15Seconds).not.toEqual(first);
   });
 
   it('creates the exact 42 deterministic Web texture particles', () => {
