@@ -108,18 +108,22 @@ export function reconcileBreathVisualAnchor(
   const candidate = createBreathVisualAnchor(next, frameTimeMs);
   if (!candidate) return { directive: 'reject', anchor: current };
 
-  const sameIdentity =
+  const samePhaseIdentity =
     current.frameActive &&
     current.phaseKey === next.phaseKey &&
     current.kind === next.kind &&
-    current.status === next.status &&
     current.reducedMotion === next.reducedMotion;
+  const sameIdentity = samePhaseIdentity && current.status === next.status;
   const timingErrorMs = Math.abs(next.phaseElapsedMs - projected.phaseElapsedMs);
   if (sameIdentity && timingErrorMs <= BREATH_REANCHOR_TOLERANCE_MS) {
     return { directive: 'retain', anchor: current };
   }
 
-  if (next.status === 'paused') {
+  if (
+    next.status === 'paused' &&
+    samePhaseIdentity &&
+    timingErrorMs <= BREATH_REANCHOR_TOLERANCE_MS
+  ) {
     return {
       directive: 'freeze',
       anchor: {
@@ -144,6 +148,7 @@ export function freezeBreathVisualClock(
   frameTimeMs: number
 ): BreathVisualAnchor {
   'worklet';
+  if (!Number.isFinite(frameTimeMs)) return anchor;
   const visible = projectBreathVisualAnchor(anchor, frameTimeMs);
   return {
     ...anchor,
@@ -160,6 +165,12 @@ export function reanchorBreathVisualClock(
   nextFrameTimeMs: number
 ): BreathVisualAnchor {
   'worklet';
+  if (
+    !Number.isFinite(previousFrameTimeMs) ||
+    !Number.isFinite(nextFrameTimeMs)
+  ) {
+    return anchor;
+  }
   const visible = projectBreathVisualAnchor(anchor, previousFrameTimeMs);
   return {
     ...anchor,

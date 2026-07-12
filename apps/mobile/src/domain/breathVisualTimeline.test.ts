@@ -22,6 +22,19 @@ const inhale: BreathVisualInput = {
   reducedMotion: false
 };
 
+function getExportedFunctionSource(source: string, name: string): string {
+  const functionStart = source.indexOf(`export function ${name}(`);
+  if (functionStart < 0) return '';
+  const nextFunctionStart = source.indexOf(
+    '\nexport function ',
+    functionStart + 1
+  );
+  return source.slice(
+    functionStart,
+    nextFunctionStart < 0 ? source.length : nextFunctionStart
+  );
+}
+
 describe('breath visual timeline', () => {
   it('projects continuous monotonic progress from absolute frame time', () => {
     const anchor = createBreathVisualAnchor(inhale, 1_000)!;
@@ -91,6 +104,61 @@ describe('breath visual timeline', () => {
     });
   });
 
+  it('corrects a new phase that arrives already paused from authoritative time', () => {
+    const running = createBreathVisualAnchor(inhale, 0)!;
+    const paused = reconcileBreathVisualAnchor(
+      running,
+      {
+        ...inhale,
+        phaseKey: '0:1',
+        kind: 'hold-full',
+        phaseElapsedMs: 180,
+        ambientElapsedMs: 4_180,
+        status: 'paused'
+      },
+      4_180
+    );
+
+    expect(paused.directive).toBe('correct');
+    expect(paused.anchor).toMatchObject({
+      phaseElapsedMs: 180,
+      ambientElapsedMs: 4_180,
+      status: 'paused'
+    });
+    expect(projectBreathVisualAnchor(paused.anchor, 90_000)).toMatchObject({
+      phaseElapsedMs: 180,
+      ambientTimeMs: 4_180
+    });
+  });
+
+  it('corrects a paused same-phase timing gap above 100ms', () => {
+    const current = createBreathVisualAnchor(
+      {
+        ...inhale,
+        status: 'paused',
+        phaseElapsedMs: 1_500,
+        ambientElapsedMs: 1_500
+      },
+      1_500
+    )!;
+    const paused = reconcileBreathVisualAnchor(
+      current,
+      { ...inhale, status: 'paused', phaseElapsedMs: 1_650 },
+      2_000
+    );
+
+    expect(paused.directive).toBe('correct');
+    expect(paused.anchor).toMatchObject({
+      phaseElapsedMs: 1_650,
+      ambientElapsedMs: 1_500,
+      status: 'paused'
+    });
+    expect(projectBreathVisualAnchor(paused.anchor, 90_000)).toMatchObject({
+      phaseElapsedMs: 1_650,
+      ambientTimeMs: 1_500
+    });
+  });
+
   it('uses authoritative foreground phase time without catching ambient time up', () => {
     const beforeBackground = createBreathVisualAnchor(
       { ...inhale, phaseElapsedMs: 1_250, ambientElapsedMs: 1_250 },
@@ -149,6 +217,35 @@ describe('breath visual timeline', () => {
     );
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'retains the last valid anchor when freeze time is non-finite',
+    (frameTimeMs) => {
+      const anchor = createBreathVisualAnchor(inhale, 100)!;
+
+      expect(freezeBreathVisualClock(anchor, frameTimeMs)).toBe(anchor);
+    }
+  );
+
+  it.each([
+    { previousFrameTimeMs: Number.NaN, nextFrameTimeMs: 50 },
+    { previousFrameTimeMs: 600, nextFrameTimeMs: Number.POSITIVE_INFINITY },
+    { previousFrameTimeMs: Number.NEGATIVE_INFINITY, nextFrameTimeMs: 50 },
+    { previousFrameTimeMs: 600, nextFrameTimeMs: Number.NEGATIVE_INFINITY }
+  ])(
+    'retains the last valid anchor when a reanchor time is non-finite',
+    ({ previousFrameTimeMs, nextFrameTimeMs }) => {
+      const anchor = createBreathVisualAnchor(inhale, 100)!;
+
+      expect(
+        reanchorBreathVisualClock(
+          anchor,
+          previousFrameTimeMs,
+          nextFrameTimeMs
+        )
+      ).toBe(anchor);
+    }
+  );
+
   it('uses a fixed non-overshooting 300ms correction envelope', () => {
     expect(BREATH_CORRECTION_MS).toBe(300);
     expect(getBreathCorrectionAmount(1_000, 1_000)).toBe(0);
@@ -163,7 +260,16 @@ describe('breath visual timeline', () => {
       'utf8'
     );
     expect(source).not.toMatch(/Date\.now|Math\.random/);
+    const misleadingSource = [
+      'export function missingDirective() { return 0; }',
+      "export function downstreamWorklet() { 'worklet'; return 1; }"
+    ].join('\n');
+    expect(
+      getExportedFunctionSource(misleadingSource, 'missingDirective')
+    ).not.toContain("'worklet';");
+
     for (const name of [
+      'easeOutCubic',
       'createBreathVisualAnchor',
       'projectBreathVisualAnchor',
       'freezeBreathVisualClock',
@@ -171,8 +277,8 @@ describe('breath visual timeline', () => {
       'reanchorBreathVisualClock',
       'getBreathCorrectionAmount'
     ]) {
-      expect(source).toMatch(
-        new RegExp(`export function ${name}\\([\\s\\S]*?'worklet';`)
+      expect(getExportedFunctionSource(source, name)).toMatch(
+        new RegExp(`^export function ${name}\\([\\s\\S]*?\\{\\s*'worklet';`)
       );
     }
   });
