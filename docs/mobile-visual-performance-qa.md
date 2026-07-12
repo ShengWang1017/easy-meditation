@@ -198,7 +198,7 @@ Execution date: 2026-07-12 CST. Overall status: **blocked**.
 ### Measurements And Files
 
 Evidence is ignored at
-`/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/`.
+`/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/`.
 
 At the measured viewport, the production width rule resolved a
 `320.9142857142857 px` Canvas. Fresh 60 Hz production-function sampling measured
@@ -210,17 +210,17 @@ the following maximum per-frame logical core-radius deltas:
 | 1,000 ms | `1.2185712725333389 px` | `1.2185712725333389 px` | passed (`<= 1.5 px`) |
 
 The source data is at
-`/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/radius-metrics.json`.
+`/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/radius-metrics.json`.
 This proves the deterministic host radius calculation only; no device frames
 were available for visual inspection.
 
 Required recording targets and their literal status:
 
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-default.mp4`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/breath-default.mp4`
   — absent / blocked before session start.
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-custom-1s.mp4`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/breath-custom-1s.mp4`
   — absent / blocked before custom configuration.
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-lifecycle.mp4`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/breath-lifecycle.mp4`
   — absent / blocked before lifecycle or reduced-motion exercise.
 
 Because no default session could be displayed and warmed, the package graphics
@@ -229,7 +229,7 @@ statistics were not reset or sampled. `android-breath-framestats.txt` and
 `maxConsecutiveOver50Ms` are unavailable rather than zero.
 
 The requested filtered error command produced an empty, preserved file:
-`/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/react-native-errors.log`
+`/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/react-native-errors.log`
 (`ReactNativeJS:E` count 0 lines / 0 bytes). The broader native log is not clean:
 the authenticated practice render reproducibly failed with
 `RetryableMountingLayerException: Unable to find viewState for tag 10. Surface stopped: false`
@@ -242,9 +242,9 @@ and adding only the explicit port-4000 reverse. A clean adb force-stop/relaunch
 without clearing Expo Go data then reproduced the same Fabric failure while the
 manifest identified the expected clean worktree and port 8082. Evidence:
 
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-clean-relaunch.log`
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure.png`
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure-ui.xml`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-clean-relaunch.log`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure.png`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure-ui.xml`
 
 Dynamic emulator/Expo Go smoke, Android frame performance, installed-app
 acceptance, and physical-device acceptance remain blocked. No metrics or

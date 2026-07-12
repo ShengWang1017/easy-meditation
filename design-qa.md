@@ -135,17 +135,17 @@ Execution date: 2026-07-12 CST.
 ### Motion And Performance Evidence
 
 The ignored evidence root is
-`/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/`.
+`/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/`.
 
 - Default recording target:
-  `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-default.mp4`
+  `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/breath-default.mp4`
   — not created because the runtime failed before the session screen was
   reachable.
 - One-second custom recording target:
-  `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-custom-1s.mp4`
+  `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/breath-custom-1s.mp4`
   — not created for the same reason.
 - Lifecycle/reduced-motion recording target:
-  `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/breath-lifecycle.mp4`
+  `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/breath-lifecycle.mp4`
   — not created for the same reason.
 - The production motion/geometry functions were sampled freshly at 60 Hz using
   the measured `411.42857142857144 px` width and resulting
@@ -159,7 +159,7 @@ The ignored evidence root is
   `maxConsecutiveOver50Ms` are therefore unavailable, and neither
   `android-breath-framestats.txt` nor `android-breath-frame-gate.json` exists.
 - The exact filtered `ReactNativeJS:E` collection contains 0 lines / 0 bytes at
-  `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/react-native-errors.log`.
+  `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/react-native-errors.log`.
   This narrow JS-tag result does not erase the native Fabric failure described
   below.
 
@@ -176,10 +176,10 @@ deep link, reproduced the same failure before any session could start.
 
 The clean relaunch log, redbox screenshot, and UI hierarchy are at:
 
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-clean-relaunch.log`
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure.png`
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure-ui.xml`
-- `/Users/didi/local-dev/any/easy-meditation/.worktrees/organic-breath-motion/.superpowers/breath-motion-acceptance-2026-07-11/radius-metrics.json`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-clean-relaunch.log`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure.png`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/expo-go-fabric-failure-ui.xml`
+- `/Users/didi/local-dev/any/easy-meditation/.superpowers/breath-motion-acceptance-2026-07-11/radius-metrics.json`
 
 No staircase, phase-boundary, pause/resume, foreground, completion/replay,
 reduced-motion, or performance claim can be made from this failed launch.
