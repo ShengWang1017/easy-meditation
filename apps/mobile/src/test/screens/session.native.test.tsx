@@ -150,7 +150,7 @@ import {
   hydrateUserPreferencesStore,
   type UserPreferencesStore
 } from '../../store/preferencesStore';
-import { colors } from '../../theme/tokens';
+import { colors, layout, spacing } from '../../theme/tokens';
 import { createTestQueryClient, renderWithProviders } from '../renderWithProviders';
 
 const fetchMethodsMock = fetchBreathingMethods as jest.MockedFunction<
@@ -322,6 +322,12 @@ describe('SessionScreen', () => {
     ]) {
       expect(view.UNSAFE_getByProps({ nativeID: id })).toBeTruthy();
     }
+    const startButton = view.UNSAFE_getByProps({ visualQaId: 'focus-start' });
+    const readyActionSlotStyle = StyleSheet.flatten(startButton.parent?.props.style);
+    expect(readyActionSlotStyle).toMatchObject({
+      justifyContent: 'flex-end',
+      minHeight: layout.touchTarget + spacing.sm + 58
+    });
     expect(mockFocusOptions?.method).toMatchObject({
       id: 'box',
       title: '盒式呼吸法',

@@ -518,6 +518,8 @@ function FocusSessionPresentation({
   );
 }
 
+const FOCUS_ACTION_SLOT_MIN_HEIGHT = layout.touchTarget + spacing.sm + 58;
+
 const styles = StyleSheet.create({
   screenContent: {
     overflow: 'hidden',
@@ -618,7 +620,9 @@ const styles = StyleSheet.create({
   actions: {
     alignItems: 'stretch',
     gap: spacing.sm,
+    justifyContent: 'flex-end',
     maxWidth: 300,
+    minHeight: FOCUS_ACTION_SLOT_MIN_HEIGHT,
     width: '100%'
   },
   startButton: {
