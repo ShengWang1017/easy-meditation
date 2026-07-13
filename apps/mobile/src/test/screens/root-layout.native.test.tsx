@@ -7,7 +7,13 @@ let mockSearchParams: { visualQaState?: string | string[] } = {};
 let mockPathname = '/practice';
 const originalDev = __DEV__;
 const mockRestore = jest.fn(async () => undefined);
-const mockAuthState = {
+const mockAuthState: {
+  accessToken: string | null;
+  isRestoring: boolean;
+  restoreError: string | null;
+  isTerminating: boolean;
+  restore: typeof mockRestore;
+} = {
   accessToken: 'access-token',
   isRestoring: false,
   restoreError: null,
@@ -20,20 +26,35 @@ jest.mock('expo-router', () => {
   const { View: MockView } = jest.requireActual<typeof import('react-native')>(
     'react-native'
   );
-  const Stack = ({ children }: { children?: React.ReactNode }) =>
-    ReactModule.createElement(MockView, { testID: 'root-stack' }, children);
-  Stack.Screen = (props: { name: string; options?: Record<string, unknown> }) => {
-    mockRegisteredScreens.push(props);
-    return null;
-  };
+  const Stack = Object.assign(
+    ({ children }: { children?: React.ReactNode }) =>
+      ReactModule.createElement(MockView, { testID: 'root-stack' }, children),
+    {
+      Screen: (props: {
+        name: string;
+        options?: Record<string, unknown>;
+      }) => {
+        mockRegisteredScreens.push(props);
+        return null;
+      },
+      Protected: ({
+        children,
+        guard
+      }: {
+        children?: React.ReactNode;
+        guard: boolean;
+      }) =>
+        guard
+          ? ReactModule.createElement(ReactModule.Fragment, null, children)
+          : null
+    }
+  );
 
   return {
-    Redirect: () => null,
     Slot: () => ReactModule.createElement(MockView, { testID: 'root-slot' }),
     Stack,
     useGlobalSearchParams: () => mockSearchParams,
-    usePathname: () => mockPathname,
-    useSegments: () => ['(tabs)', 'practice']
+    usePathname: () => mockPathname
   };
 });
 jest.mock('../../auth/AuthSessionBoundary', () => ({
@@ -134,6 +155,7 @@ describe('root session route options', () => {
   beforeEach(() => {
     (global as typeof globalThis & { __DEV__: boolean }).__DEV__ = true;
     mockRegisteredScreens.length = 0;
+    mockAuthState.accessToken = 'access-token';
     mockRestore.mockClear();
     mockSearchParams = {};
     mockPathname = '/practice';
@@ -161,6 +183,39 @@ describe('root session route options', () => {
       headerBackButtonMenuEnabled: false
     });
     expect(qaBoundaryModuleLoads()).toBe(0);
+  });
+
+  it('keeps an unauthenticated cold start inside the root stack', () => {
+    mockAuthState.accessToken = null;
+
+    const view = render(<RootLayout />);
+
+    expect(view.getByTestId('root-stack')).toBeTruthy();
+    expect(mockRegisteredScreens.map((screen) => screen.name)).toEqual([
+      '(auth)/login',
+      '(auth)/register'
+    ]);
+  });
+
+  it('removes protected routes when the authenticated session ends', () => {
+    const view = render(<RootLayout />);
+
+    expect(mockRegisteredScreens.map((screen) => screen.name)).toEqual([
+      '(tabs)',
+      'guide',
+      'custom-rhythm',
+      'session/[methodId]'
+    ]);
+
+    mockRegisteredScreens.length = 0;
+    mockAuthState.accessToken = null;
+    view.rerender(<RootLayout />);
+
+    expect(view.getByTestId('root-stack')).toBeTruthy();
+    expect(mockRegisteredScreens.map((screen) => screen.name)).toEqual([
+      '(auth)/login',
+      '(auth)/register'
+    ]);
   });
 
   it('does not load the QA module in production even when the env and query request it', () => {

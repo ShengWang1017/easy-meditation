@@ -1,14 +1,7 @@
 import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import {
-  Redirect,
-  Slot,
-  Stack,
-  useGlobalSearchParams,
-  usePathname,
-  useSegments
-} from 'expo-router';
+import { Slot, Stack, useGlobalSearchParams, usePathname } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -20,17 +13,39 @@ import '../src/theme/assets';
 import { PrototypeFontBoundary } from '../src/theme/PrototypeFontBoundary';
 import { colors, spacing } from '../src/theme/tokens';
 
+const sessionScreenOptions = {
+  headerShown: false,
+  gestureEnabled: false,
+  headerBackButtonMenuEnabled: false
+} as const;
+
 function ProtectedStack() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen
         name="session/[methodId]"
-        options={{
-          headerShown: false,
-          gestureEnabled: false,
-          headerBackButtonMenuEnabled: false
-        }}
+        options={sessionScreenOptions}
       />
+    </Stack>
+  );
+}
+
+function NormalStack({ authenticated }: { authenticated: boolean }) {
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Protected guard={!authenticated}>
+        <Stack.Screen name="(auth)/login" />
+        <Stack.Screen name="(auth)/register" />
+      </Stack.Protected>
+      <Stack.Protected guard={authenticated}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="guide" />
+        <Stack.Screen name="custom-rhythm" />
+        <Stack.Screen
+          name="session/[methodId]"
+          options={sessionScreenOptions}
+        />
+      </Stack.Protected>
     </Stack>
   );
 }
@@ -41,8 +56,6 @@ function NormalRootNavigator() {
   const restoreError = useAuthStore((state) => state.restoreError);
   const isTerminating = useAuthStore((state) => state.isTerminating);
   const restore = useAuthStore((state) => state.restore);
-  const segments = useSegments();
-  const inAuthGroup = segments[0] === '(auth)';
 
   useEffect(() => {
     void restore();
@@ -73,23 +86,13 @@ function NormalRootNavigator() {
     );
   }
 
+  const stack = <NormalStack authenticated={Boolean(accessToken)} />;
+
   if (!accessToken) {
-    if (!inAuthGroup) {
-      return <Redirect href="/(auth)/login" />;
-    }
-
-    return <Slot />;
+    return stack;
   }
 
-  if (inAuthGroup) {
-    return <Redirect href="/(tabs)/practice" />;
-  }
-
-  return (
-    <AuthSessionBoundary>
-      <ProtectedStack />
-    </AuthSessionBoundary>
-  );
+  return <AuthSessionBoundary>{stack}</AuthSessionBoundary>;
 }
 
 function RootNavigator() {
