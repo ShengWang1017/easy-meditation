@@ -29,7 +29,7 @@ This is a routing/provider lifetime race, not stale emulator data or an API fail
 
 Use Expo Router's locally installed `Stack.Protected` API to configure mutually exclusive route sets in one root stack.
 
-- When unauthenticated, the stack includes only `(auth)`.
+- When unauthenticated, the stack includes only `(auth)/login` and `(auth)/register`. These pages are registered individually because `(auth)` has no `_layout.tsx`, so Expo Router hoists both pages into the root layout.
 - When authenticated, the stack includes `(tabs)`, `guide`, `custom-rhythm`, and `session/[methodId]`.
 - The authenticated stack is wrapped by `AuthSessionBoundary`, which prepares the user-scoped preferences store before rendering protected routes.
 - The unauthenticated stack is rendered without `AuthSessionBoundary` because no user-scoped store should exist.
@@ -44,7 +44,7 @@ The current redirect-based authentication branching will be removed from normal 
 
 1. Authentication restore shows the existing loading state.
 2. Restore resolves with no access token.
-3. The root stack enables only the auth group.
+3. The root stack enables only the login and registration routes, with login declared first as the fallback route.
 4. Expo Router selects the login route; no protected screen mounts.
 
 ### Login
@@ -83,7 +83,7 @@ The current redirect-based authentication branching will be removed from normal 
 
 ## Risks and Mitigations
 
-- **Incorrectly omitted route:** Explicitly list every current top-level protected route and assert registrations in tests.
+- **Incorrectly omitted route:** Explicitly list every current root route, including the two hoisted auth pages, and assert registrations in tests.
 - **Session options regression:** Reuse the existing session screen options and retain their current assertions.
 - **Visual-QA regression:** Leave the visual-QA navigator path independent from normal authentication guards.
 - **Provider timing regression:** Test the authenticated-to-unauthenticated rerender, which reproduces the lifetime boundary that caused the Android crash.
