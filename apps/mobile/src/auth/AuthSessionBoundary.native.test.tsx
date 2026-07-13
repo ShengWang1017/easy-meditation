@@ -69,18 +69,40 @@ jest.mock('../query/client', () => {
 });
 jest.mock('expo-router', () => {
   const React = jest.requireActual<typeof import('react')>('react');
-  const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
-  const Stack = () => mockRouterState.renderSlot();
-  Stack.Screen = () => null;
+  const { View } = jest.requireActual<typeof import('react-native')>(
+    'react-native'
+  );
+  const Stack = Object.assign(
+    ({ children }: { children?: React.ReactNode }) =>
+      React.createElement(View, { testID: 'root-stack' }, children),
+    {
+      Screen: ({ name }: { name: string }) => {
+        const [rootSegment, childSegment] = mockRouterState.segments;
+        const activeRootScreen =
+          rootSegment === '(auth)'
+            ? `(auth)/${childSegment ?? 'login'}`
+            : rootSegment;
+
+        return name === activeRootScreen ? mockRouterState.renderSlot() : null;
+      },
+      Protected: ({
+        children,
+        guard
+      }: {
+        children?: React.ReactNode;
+        guard: boolean;
+      }) =>
+        guard
+          ? React.createElement(React.Fragment, null, children)
+          : null
+    }
+  );
 
   return {
-    Redirect: ({ href }: { href: string }) =>
-      React.createElement(Text, { testID: 'root-redirect' }, href),
     Slot: () => mockRouterState.renderSlot(),
     Stack,
     useGlobalSearchParams: () => ({}),
-    usePathname: () => '/login',
-    useSegments: () => mockRouterState.segments
+    usePathname: () => '/login'
   };
 });
 jest.mock('../qa/VisualQaFixtureBoundary', () => ({
@@ -553,7 +575,6 @@ describe('AuthSessionBoundary', () => {
       await waitFor(() => expect(retireMock).toHaveBeenCalledTimes(1));
 
       expect(view.queryByTestId('session-user')).toBeNull();
-      expect(view.queryByTestId('root-redirect')).toBeNull();
       expect(useAuthStore.getState()).toMatchObject({
         accessToken: 'access-a',
         refreshToken: 'refresh-a',
@@ -572,7 +593,8 @@ describe('AuthSessionBoundary', () => {
         isTerminating: false,
         sessionRevision: 2
       });
-      expect(view.getByTestId('root-redirect').props.children).toBe('/(auth)/login');
+      expect(view.getByTestId('root-stack')).toBeTruthy();
+      expect(view.queryByTestId('session-user')).toBeNull();
       expect(view.queryByText(USER_A.id)).toBeNull();
 
       mockRouterState.segments = ['(auth)'];
